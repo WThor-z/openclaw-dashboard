@@ -73,16 +73,25 @@ describe("daemon routes", () => {
     const server = await startServer({ adminToken: "dev-token" });
     const baseUrl = endpointFrom(server.address());
 
-    const response = await fetch(`${baseUrl}/api/control/ping`, {
+    const armResponse = await fetch(`${baseUrl}/api/control/arm`, {
       method: "POST",
       headers: {
         authorization: "Bearer dev-token"
       }
     });
+    expect(armResponse.status).toBe(200);
+
+    const response = await fetch(`${baseUrl}/api/control/ping`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "idempotency-key": "server-test-ping"
+      }
+    });
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ ok: true });
+    expect(body).toEqual({ ok: true, armed: true });
   });
 
   it("logs request id for handled requests", async () => {

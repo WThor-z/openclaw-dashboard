@@ -95,6 +95,9 @@ export function createStorageRepositories(db) {
     listEventsPageAfterCursor: db.prepare(
       "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE (created_at < ?) OR (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?"
     ),
+    getEventByDedupeKey: db.prepare(
+      "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE dedupe_key = ? LIMIT 1"
+    ),
     insertSession: db.prepare(
       "INSERT INTO sessions(id, workspace_id, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?)"
     ),
@@ -118,6 +121,9 @@ export function createStorageRepositories(db) {
     ),
     getTaskById: db.prepare(
       "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, state, summary, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE id = ? LIMIT 1"
+    ),
+    updateTaskState: db.prepare(
+      "UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?"
     ),
     insertCostEntry: db.prepare(
       "INSERT INTO cost_entries(id, workspace_id, session_id, task_id, amount_usd, model, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -242,6 +248,9 @@ export function createStorageRepositories(db) {
           cursor.id,
           limit
         );
+      },
+      getByDedupeKey(dedupeKey) {
+        return statements.getEventByDedupeKey.get(dedupeKey) ?? null;
       }
     },
     sessions: {
@@ -270,6 +279,10 @@ export function createStorageRepositories(db) {
       },
       getById(id) {
         return statements.getTaskById.get(id) ?? null;
+      },
+      updateState({ id, state, updatedAt }) {
+        const result = statements.updateTaskState.run(state, updatedAt, id);
+        return result.changes > 0;
       }
     },
     costEntries: {

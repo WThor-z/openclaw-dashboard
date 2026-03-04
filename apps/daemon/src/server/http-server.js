@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 
+import { createControlApiRouter } from "../api/control/index.js";
 import { createReadApiRouter } from "../api/read/index.js";
 import { assertAuthorizedControlRequest } from "../middleware/auth-gate.js";
 import { HttpError, sendError, sendJson } from "../middleware/error-handler.js";
@@ -14,11 +15,24 @@ function isControlRoute(pathname) {
   return pathname.startsWith("/api/control/");
 }
 
-function requestHandlerFactory({ adminToken, logger, repositories, statusProvider, monitorProviders }) {
+function requestHandlerFactory({
+  adminToken,
+  logger,
+  repositories,
+  statusProvider,
+  monitorProviders,
+  readOnlyMode,
+  writeArmWindowMs
+}) {
   const readRouter = createReadApiRouter({
     repositories,
     statusProvider,
     monitorProviders
+  });
+  const controlRouter = createControlApiRouter({
+    repositories,
+    readOnlyMode,
+    writeArmWindowMs
   });
 
   return async function handleRequest(req, res) {
@@ -47,8 +61,7 @@ function requestHandlerFactory({ adminToken, logger, repositories, statusProvide
         return;
       }
 
-      if (req.method === "POST" && pathname === "/api/control/ping") {
-        sendJson(res, 200, { ok: true });
+      if (await controlRouter.handle(req, res, requestUrl)) {
         return;
       }
 
@@ -63,6 +76,8 @@ export function createDaemonServer({
   host,
   port,
   adminToken = process.env.DASHBOARD_ADMIN_TOKEN,
+  readOnlyMode = process.env.DAEMON_READ_ONLY_SAFETY_MODE === "1",
+  writeArmWindowMs = Number.parseInt(process.env.DAEMON_CONTROL_ARM_WINDOW_MS ?? "", 10),
   logger = console,
   repositories,
   statusProvider,
@@ -75,7 +90,9 @@ export function createDaemonServer({
       logger,
       repositories,
       statusProvider,
-      monitorProviders
+      monitorProviders,
+      readOnlyMode,
+      writeArmWindowMs
     })
   );
 

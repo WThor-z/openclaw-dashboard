@@ -45,3 +45,7 @@ Analysis: Extracted top-level plan tasks 1-16 and F1-F4 with wave/parallelizatio
 - 2026-03-04: Task 7 read API surface is now routed through `apps/daemon/src/api/read/index.js` from `http-server.js`, keeping read endpoints unauthenticated while preserving `/api/control/*` auth-gate behavior.
 - 2026-03-04: Event pagination now uses an opaque base64url cursor over `(createdAt,id)` with SQL predicate `(created_at < ?) OR (created_at = ? AND id < ?)` and deterministic ordering `created_at DESC, id DESC`, which remains stable across newer inserts.
 - 2026-03-04: Event payload responses parse JSON and recursively redact any key containing `token` or `secret` as `[REDACTED]`; monitor stubs are also passed through the same redaction helper to prevent accidental leakage in future collector wiring.
+
+- 2026-03-04: Task 8 control writes now route through `apps/daemon/src/api/control/index.js` and are uniformly guarded by bearer auth (existing middleware), write-arming (`/api/control/arm` window), idempotency-key replay, and optional read-only safety mode (`DAEMON_READ_ONLY_SAFETY_MODE=1` -> `READ_ONLY_SAFETY_MODE`).
+- 2026-03-04: Idempotency replay is persisted via `events.dedupe_key` with a route-scoped dedupe key (`<route>:<idempotency-key>`); duplicate writes replay the stored prior response payload instead of creating a second mutation audit record.
+- 2026-03-04: Config apply now enforces optimistic `baseVersion` against snapshot count and returns `CONFIG_VERSION_CONFLICT` on stale versions before any snapshot/config-operation/audit writes.

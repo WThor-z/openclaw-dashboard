@@ -19,3 +19,5 @@
 
 - 2026-03-04: Task 6 evidence command `pnpm --filter @apps/daemon test -- test/ingest/pipeline.test.js -t "idempotent|malformed"` still executes full daemon suite under current script wiring; log remains valid but includes unrelated passing suites.
 - 2026-03-04: For Task 7 evidence, `pnpm --filter @apps/daemon test -- test/api/read/read-apis.test.js -t "rejects unbounded event limit"` still runs full suite under current package script, so error-path evidence includes broader passing output plus target-case coverage.
+
+- 2026-03-04: Task 8 evidence commands with `pnpm --filter @apps/daemon test -- ... -t ...` still execute all daemon test files due current Vitest invocation shape in package script; targeted scenario output is present but bundled with full-suite pass lines.

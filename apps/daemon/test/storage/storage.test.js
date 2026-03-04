@@ -137,4 +137,81 @@ describe("storage repositories", () => {
       expect.objectContaining({ code: SECRET_PERSISTENCE_BLOCKED })
     );
   });
+
+  it("manages webhook outbox retries and breaker persistence", () => {
+    const db = createMemoryDb();
+
+    runMigrations(db, { direction: "up" });
+    const repos = createStorageRepositories(db);
+
+    repos.webhooks.insert({
+      id: "wh-1",
+      workspaceId: "w-1",
+      endpointUrl: "https://receiver.test/webhook",
+      secretRef: "WEBHOOK_SECRET",
+      enabled: 1,
+      breakerState: "closed",
+      consecutiveFailures: 0,
+      breakerNextAttemptAt: null,
+      createdAt: "2026-03-04T11:00:00.000Z",
+      updatedAt: "2026-03-04T11:00:00.000Z"
+    });
+
+    repos.webhookDeliveries.enqueue({
+      id: "delivery-1",
+      webhookId: "wh-1",
+      eventId: null,
+      payloadJson: JSON.stringify({ ok: true }),
+      status: "pending",
+      attemptCount: 0,
+      maxAttempts: 4,
+      responseCode: null,
+      attemptedAt: null,
+      nextAttemptAt: "2026-03-04T11:00:00.000Z",
+      lastError: null,
+      createdAt: "2026-03-04T11:00:00.000Z",
+      updatedAt: "2026-03-04T11:00:00.000Z"
+    });
+
+    const due = repos.webhookDeliveries.listDue("2026-03-04T11:00:00.000Z", 10);
+    expect(due).toHaveLength(1);
+    expect(due[0].attemptCount).toBe(0);
+
+    repos.webhookDeliveries.markRetry({
+      id: "delivery-1",
+      attemptCount: 1,
+      responseCode: 503,
+      attemptedAt: "2026-03-04T11:00:01.000Z",
+      nextAttemptAt: "2026-03-04T11:00:06.000Z",
+      lastError: "upstream unavailable",
+      updatedAt: "2026-03-04T11:00:01.000Z"
+    });
+
+    repos.webhooks.updateBreaker({
+      id: "wh-1",
+      breakerState: "open",
+      consecutiveFailures: 3,
+      breakerNextAttemptAt: "2026-03-04T11:00:30.000Z",
+      updatedAt: "2026-03-04T11:00:01.000Z"
+    });
+
+    const summary = repos.webhooks.listWithDeliverySummaryByWorkspace("w-1");
+    expect(summary).toHaveLength(1);
+    expect(summary[0]).toMatchObject({
+      id: "wh-1",
+      breakerState: "open",
+      consecutiveFailures: 3,
+      lastStatus: "retrying",
+      nextAttemptAt: "2026-03-04T11:00:06.000Z"
+    });
+
+    const history = repos.webhookDeliveries.listByWebhook("wh-1");
+    expect(history[0]).toMatchObject({
+      id: "delivery-1",
+      status: "retrying",
+      attemptCount: 1,
+      responseCode: 503,
+      nextAttemptAt: "2026-03-04T11:00:06.000Z"
+    });
+  });
 });

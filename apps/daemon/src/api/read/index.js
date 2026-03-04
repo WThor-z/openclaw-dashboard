@@ -8,6 +8,7 @@ import {
 import { handleSessionDetailRead, handleSessionsListRead } from "./sessions.js";
 import { handleStatusRead } from "./status.js";
 import { handleTaskDetailRead, handleTasksListRead } from "./tasks.js";
+import { handleWebhookDeliveriesRead, handleWebhooksSummaryRead } from "./webhooks.js";
 
 function extractSuffix(pathname, prefix) {
   if (!pathname.startsWith(prefix)) {
@@ -77,6 +78,26 @@ export function createReadApiRouter({ repositories, statusProvider, monitorProvi
 
       if (pathname === "/api/monitors/openclaw") {
         handleOpenclawMonitorRead(res, monitorProviders);
+        return true;
+      }
+
+      if (pathname === "/api/webhooks") {
+        handleWebhooksSummaryRead(res, requestUrl.searchParams, repositories);
+        return true;
+      }
+
+      const webhookSuffix = extractSuffix(pathname, "/api/webhooks/");
+      if (webhookSuffix !== null) {
+        if (!webhookSuffix.endsWith("/deliveries")) {
+          throw new HttpError(404, "NOT_FOUND", "Route not found");
+        }
+
+        const webhookId = webhookSuffix.slice(0, -"/deliveries".length);
+        if (!webhookId) {
+          throw new HttpError(404, "NOT_FOUND", "Route not found");
+        }
+
+        handleWebhookDeliveriesRead(res, repositories, decodeURIComponent(webhookId));
         return true;
       }
 

@@ -28,6 +28,24 @@ function parseNumber(value) {
   return null;
 }
 
+function parseBoolean(value, defaultValue = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0") {
+      return false;
+    }
+  }
+
+  return defaultValue;
+}
+
 function parseIdempotencyKey(req) {
   const rawValue = req.headers["idempotency-key"];
   const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
@@ -171,6 +189,7 @@ export function createControlApiRouter({
   readOnlyMode = false,
   writeArmWindowMs = DEFAULT_ARM_WINDOW_MS
 } = {}) {
+  const mutationLocks = new Map();
   const armingState = {
     armedUntil: 0,
     windowMs:
@@ -204,25 +223,8 @@ export function createControlApiRouter({
       return;
     }
 
-    const body = await parseRequestBody(req);
-    const mutation = await mutationHandler(body);
-
-    const persisted = persistAuditEvent({
-      repositories,
-      dedupeKey,
-      workspaceId: mutation.workspaceId,
-      taskId: mutation.taskId,
-      kind: mutation.kind,
-      payload: {
-        request: redactSecrets(body),
-        response: {
-          status: mutation.status,
-          body: mutation.body
-        }
-      }
-    });
-
-    if (!persisted) {
+    if (mutationLocks.has(dedupeKey)) {
+      await mutationLocks.get(dedupeKey);
       const replayed = replayIfMatched(repositories, dedupeKey);
       if (replayed) {
         sendJson(res, replayed.status, replayed.body);
@@ -230,7 +232,44 @@ export function createControlApiRouter({
       }
     }
 
-    sendJson(res, mutation.status, mutation.body);
+    let releaseLock = () => {};
+    const lockPromise = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    mutationLocks.set(dedupeKey, lockPromise);
+
+    try {
+      const body = await parseRequestBody(req);
+      const mutation = await mutationHandler(body);
+
+      const persisted = persistAuditEvent({
+        repositories,
+        dedupeKey,
+        workspaceId: mutation.workspaceId,
+        taskId: mutation.taskId,
+        kind: mutation.kind,
+        payload: {
+          request: redactSecrets(body),
+          response: {
+            status: mutation.status,
+            body: mutation.body
+          }
+        }
+      });
+
+      if (!persisted) {
+        const replayed = replayIfMatched(repositories, dedupeKey);
+        if (replayed) {
+          sendJson(res, replayed.status, replayed.body);
+          return;
+        }
+      }
+
+      sendJson(res, mutation.status, mutation.body);
+    } finally {
+      mutationLocks.delete(dedupeKey);
+      releaseLock();
+    }
   }
 
   function resolveTaskCancelSuffix(pathname) {
@@ -267,6 +306,37 @@ export function createControlApiRouter({
     }
 
     return decodeURIComponent(approvalId);
+  }
+
+  function resolveWebhookSuffix(pathname) {
+    const prefix = "/api/control/webhooks/";
+    if (!pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const suffix = pathname.slice(prefix.length);
+    if (!suffix) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    if (suffix === "create") {
+      return { action: "create", webhookId: null };
+    }
+
+    const segments = suffix.split("/");
+    if (segments.length === 2 && segments[0].length > 0) {
+      if (segments[1] === "update") {
+        return { action: "update", webhookId: decodeURIComponent(segments[0]) };
+      }
+      if (segments[1] === "disable") {
+        return { action: "disable", webhookId: decodeURIComponent(segments[0]) };
+      }
+      if (segments[1] === "enqueue") {
+        return { action: "enqueue", webhookId: decodeURIComponent(segments[0]) };
+      }
+    }
+
+    throw new HttpError(404, "NOT_FOUND", "Route not found");
   }
 
   return {
@@ -383,6 +453,189 @@ export function createControlApiRouter({
           };
         });
         return true;
+      }
+
+      const webhookRoute = resolveWebhookSuffix(pathname);
+      if (webhookRoute !== null) {
+        const now = new Date().toISOString();
+
+        if (webhookRoute.action === "create") {
+          await handleMutation(req, res, pathname, "control.webhooks.create", async (body) => {
+            const workspaceId =
+              typeof body.workspaceId === "string" && body.workspaceId.trim().length > 0
+                ? body.workspaceId.trim()
+                : "global";
+            if (typeof body.endpointUrl !== "string" || body.endpointUrl.trim().length === 0) {
+              throw new HttpError(400, "ENDPOINT_URL_REQUIRED", "endpointUrl is required");
+            }
+            if (typeof body.secretRef !== "string" || body.secretRef.trim().length === 0) {
+              throw new HttpError(400, "SECRET_REF_REQUIRED", "secretRef is required");
+            }
+
+            const webhookId =
+              typeof body.webhookId === "string" && body.webhookId.trim().length > 0
+                ? body.webhookId.trim()
+                : randomUUID();
+            const enabled = parseBoolean(body.enabled, true) ? 1 : 0;
+
+            if (repositories?.webhooks?.insert) {
+              repositories.webhooks.insert({
+                id: webhookId,
+                workspaceId,
+                endpointUrl: body.endpointUrl.trim(),
+                secretRef: body.secretRef.trim(),
+                enabled,
+                createdAt: now,
+                updatedAt: now,
+                breakerState: "closed",
+                consecutiveFailures: 0,
+                breakerNextAttemptAt: null
+              });
+            }
+
+            return {
+              status: 200,
+              body: { ok: true, webhookId, enabled: enabled === 1 },
+              workspaceId,
+              kind: "control.webhooks.create"
+            };
+          });
+          return true;
+        }
+
+        if (webhookRoute.action === "update") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.webhooks.update:${webhookRoute.webhookId}`,
+            async (body) => {
+              const webhook = repositories?.webhooks?.getById
+                ? repositories.webhooks.getById(webhookRoute.webhookId)
+                : null;
+              if (!webhook) {
+                throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
+              }
+
+              const endpointUrl =
+                typeof body.endpointUrl === "string" && body.endpointUrl.trim().length > 0
+                  ? body.endpointUrl.trim()
+                  : webhook.endpointUrl;
+              const secretRef =
+                typeof body.secretRef === "string" && body.secretRef.trim().length > 0
+                  ? body.secretRef.trim()
+                  : webhook.secretRef;
+              const enabled = parseBoolean(body.enabled, webhook.enabled === 1) ? 1 : 0;
+
+              const updated = repositories?.webhooks?.update
+                ? repositories.webhooks.update({
+                  id: webhookRoute.webhookId,
+                  endpointUrl,
+                  secretRef,
+                  enabled,
+                  updatedAt: now
+                })
+                : false;
+              if (!updated) {
+                throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
+              }
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  webhookId: webhookRoute.webhookId,
+                  enabled: enabled === 1
+                },
+                workspaceId: webhook.workspaceId,
+                kind: "control.webhooks.update"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (webhookRoute.action === "disable") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.webhooks.disable:${webhookRoute.webhookId}`,
+            async () => {
+              const webhook = repositories?.webhooks?.getById
+                ? repositories.webhooks.getById(webhookRoute.webhookId)
+                : null;
+              if (!webhook) {
+                throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
+              }
+
+              const disabled = repositories?.webhooks?.disable
+                ? repositories.webhooks.disable({ id: webhookRoute.webhookId, updatedAt: now })
+                : false;
+              if (!disabled) {
+                throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
+              }
+
+              return {
+                status: 200,
+                body: { ok: true, webhookId: webhookRoute.webhookId, enabled: false },
+                workspaceId: webhook.workspaceId,
+                kind: "control.webhooks.disable"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (webhookRoute.action === "enqueue") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.webhooks.enqueue:${webhookRoute.webhookId}`,
+            async (body) => {
+              const webhook = repositories?.webhooks?.getById
+                ? repositories.webhooks.getById(webhookRoute.webhookId)
+                : null;
+              if (!webhook) {
+                throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
+              }
+
+              const payload = isObjectRecord(body.payload) ? body.payload : {};
+              const deliveryId = randomUUID();
+              if (repositories?.webhookDeliveries?.enqueue) {
+                repositories.webhookDeliveries.enqueue({
+                  id: deliveryId,
+                  webhookId: webhookRoute.webhookId,
+                  eventId: null,
+                  payloadJson: JSON.stringify(payload),
+                  status: "pending",
+                  attemptCount: 0,
+                  maxAttempts: parseNumber(body.maxAttempts) ?? 5,
+                  responseCode: null,
+                  attemptedAt: now,
+                  nextAttemptAt: now,
+                  lastError: null,
+                  createdAt: now,
+                  updatedAt: now
+                });
+              }
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  webhookId: webhookRoute.webhookId,
+                  deliveryId,
+                  status: "pending"
+                },
+                workspaceId: webhook.workspaceId,
+                kind: "control.webhooks.enqueue"
+              };
+            }
+          );
+          return true;
+        }
       }
 
       if (pathname === "/api/control/config/diff") {

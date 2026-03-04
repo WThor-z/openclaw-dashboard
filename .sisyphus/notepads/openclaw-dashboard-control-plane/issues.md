@@ -21,3 +21,5 @@
 - 2026-03-04: For Task 7 evidence, `pnpm --filter @apps/daemon test -- test/api/read/read-apis.test.js -t "rejects unbounded event limit"` still runs full suite under current package script, so error-path evidence includes broader passing output plus target-case coverage.
 
 - 2026-03-04: Task 8 evidence commands with `pnpm --filter @apps/daemon test -- ... -t ...` still execute all daemon test files due current Vitest invocation shape in package script; targeted scenario output is present but bundled with full-suite pass lines.
+
+- 2026-03-05: For task-9 failure-path evidence, `pnpm --filter @apps/daemon test -- ... -t ...` still runs full suite and may hide selected-case names; switched to `pnpm --filter @apps/daemon exec vitest run ... --reporter=verbose` so `.sisyphus/evidence/task-9-webhooks-error.log` explicitly shows `WEBHOOK_NOT_FOUND` case execution.

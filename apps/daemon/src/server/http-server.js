@@ -6,6 +6,7 @@ import { assertAuthorizedControlRequest } from "../middleware/auth-gate.js";
 import { HttpError, sendError, sendJson } from "../middleware/error-handler.js";
 import { attachRequestId } from "../middleware/request-id.js";
 import { resolveBindConfig } from "./config.js";
+import { createWebhookOutboxWorker } from "../webhooks/outbox-worker.js";
 
 function parseRequestUrl(req) {
   return new URL(req.url ?? "/", "http://localhost");
@@ -81,7 +82,9 @@ export function createDaemonServer({
   logger = console,
   repositories,
   statusProvider,
-  monitorProviders
+  monitorProviders,
+  webhookWorker,
+  webhookWorkerOptions = {}
 } = {}) {
   const bindConfig = resolveBindConfig({ host, port });
   const server = createServer(
@@ -96,13 +99,34 @@ export function createDaemonServer({
     })
   );
 
+  const worker =
+    webhookWorker ??
+    (repositories?.webhookDeliveries && repositories?.webhooks
+      ? createWebhookOutboxWorker({
+        repositories,
+        resolveSecretRef(secretRef) {
+          if (typeof secretRef !== "string" || secretRef.length === 0) {
+            return null;
+          }
+
+          return process.env[secretRef] ?? null;
+        },
+        logger,
+        ...webhookWorkerOptions
+      })
+      : null);
+
   return {
     start() {
       return new Promise((resolve, reject) => {
         server.once("error", reject);
         server.listen(bindConfig.port, bindConfig.host, () => {
           server.off("error", reject);
-          resolve();
+          Promise.resolve(worker?.start?.())
+            .then(() => {
+              resolve();
+            })
+            .catch(reject);
         });
       });
     },
@@ -114,7 +138,11 @@ export function createDaemonServer({
             return;
           }
 
-          resolve();
+          Promise.resolve(worker?.stop?.())
+            .then(() => {
+              resolve();
+            })
+            .catch(reject);
         });
       });
     },

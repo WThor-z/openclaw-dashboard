@@ -2,7 +2,7 @@ export const SECRET_PERSISTENCE_BLOCKED = "SECRET_PERSISTENCE_BLOCKED";
 
 const SECRET_KEY_PATTERN = /(token|secret)/i;
 const ALLOWED_SECRET_KEY_PATTERN =
-  /(secret_ref|token_ref|secret_hash|token_hash|encrypted|ciphertext|salt)/i;
+  /(secret_ref|token_ref|secretRef|tokenRef|secret_hash|token_hash|encrypted|ciphertext|salt)/i;
 
 /**
  * @extends {Error}
@@ -147,16 +147,46 @@ export function createStorageRepositories(db) {
       "SELECT id, workspace_id AS workspaceId, actor, operation, payload_json AS payloadJson, created_at AS createdAt FROM config_operations WHERE workspace_id = ? ORDER BY created_at DESC"
     ),
     insertWebhook: db.prepare(
-      "INSERT INTO webhooks(id, workspace_id, endpoint_url, secret_ref, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO webhooks(id, workspace_id, endpoint_url, secret_ref, enabled, created_at, updated_at, breaker_state, consecutive_failures, breaker_next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ),
+    updateWebhook: db.prepare(
+      "UPDATE webhooks SET endpoint_url = ?, secret_ref = ?, enabled = ?, updated_at = ? WHERE id = ?"
+    ),
+    disableWebhook: db.prepare(
+      "UPDATE webhooks SET enabled = 0, updated_at = ? WHERE id = ?"
+    ),
+    updateWebhookBreaker: db.prepare(
+      "UPDATE webhooks SET breaker_state = ?, consecutive_failures = ?, breaker_next_attempt_at = ?, updated_at = ? WHERE id = ?"
+    ),
+    getWebhookById: db.prepare(
+      "SELECT id, workspace_id AS workspaceId, endpoint_url AS endpointUrl, secret_ref AS secretRef, enabled, created_at AS createdAt, updated_at AS updatedAt, breaker_state AS breakerState, consecutive_failures AS consecutiveFailures, breaker_next_attempt_at AS breakerNextAttemptAt FROM webhooks WHERE id = ? LIMIT 1"
     ),
     listWebhooksByWorkspace: db.prepare(
-      "SELECT id, workspace_id AS workspaceId, endpoint_url AS endpointUrl, secret_ref AS secretRef, enabled, created_at AS createdAt FROM webhooks WHERE workspace_id = ? ORDER BY created_at DESC"
+      "SELECT id, workspace_id AS workspaceId, endpoint_url AS endpointUrl, secret_ref AS secretRef, enabled, created_at AS createdAt, updated_at AS updatedAt, breaker_state AS breakerState, consecutive_failures AS consecutiveFailures, breaker_next_attempt_at AS breakerNextAttemptAt FROM webhooks WHERE workspace_id = ? ORDER BY created_at DESC"
     ),
-    insertWebhookDelivery: db.prepare(
-      "INSERT INTO webhook_deliveries(id, webhook_id, event_id, status, response_code, attempted_at) VALUES (?, ?, ?, ?, ?, ?)"
+    listWebhooksWithDeliverySummaryByWorkspace: db.prepare(
+      "SELECT w.id, w.workspace_id AS workspaceId, w.endpoint_url AS endpointUrl, w.secret_ref AS secretRef, w.enabled, w.created_at AS createdAt, w.updated_at AS updatedAt, w.breaker_state AS breakerState, w.consecutive_failures AS consecutiveFailures, w.breaker_next_attempt_at AS breakerNextAttemptAt, d.status AS lastStatus, d.attempt_count AS lastAttemptCount, d.next_attempt_at AS nextAttemptAt, d.response_code AS lastResponseCode, d.attempted_at AS attemptedAt FROM webhooks w LEFT JOIN webhook_deliveries d ON d.id = (SELECT wd.id FROM webhook_deliveries wd WHERE wd.webhook_id = w.id ORDER BY wd.updated_at DESC, wd.id DESC LIMIT 1) WHERE w.workspace_id = ? ORDER BY w.created_at DESC"
+    ),
+    enqueueWebhookDelivery: db.prepare(
+      "INSERT INTO webhook_deliveries(id, webhook_id, event_id, payload_json, status, attempt_count, max_attempts, response_code, attempted_at, next_attempt_at, last_error, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ),
+    listDueWebhookDeliveries: db.prepare(
+      "SELECT d.id, d.webhook_id AS webhookId, d.event_id AS eventId, d.payload_json AS payloadJson, d.status, d.attempt_count AS attemptCount, d.max_attempts AS maxAttempts, d.response_code AS responseCode, d.attempted_at AS attemptedAt, d.next_attempt_at AS nextAttemptAt, d.last_error AS lastError, d.created_at AS createdAt, d.updated_at AS updatedAt, w.endpoint_url AS endpointUrl, w.secret_ref AS secretRef, w.enabled, w.breaker_state AS breakerState, w.consecutive_failures AS consecutiveFailures, w.breaker_next_attempt_at AS breakerNextAttemptAt FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.enabled = 1 AND ((d.status IN ('pending', 'retrying') AND d.next_attempt_at <= ?) OR (d.status = 'in_progress' AND d.updated_at <= ?)) AND (w.breaker_state = 'closed' OR w.breaker_state = 'half_open' OR (w.breaker_state = 'open' AND (w.breaker_next_attempt_at IS NULL OR w.breaker_next_attempt_at <= ?))) ORDER BY d.next_attempt_at ASC, d.id ASC LIMIT ?"
+    ),
+    claimWebhookDelivery: db.prepare(
+      "UPDATE webhook_deliveries SET status = 'in_progress', updated_at = ? WHERE id = ? AND (status IN ('pending', 'retrying') OR (status = 'in_progress' AND updated_at <= ?))"
+    ),
+    markWebhookDeliveryDelivered: db.prepare(
+      "UPDATE webhook_deliveries SET status = 'delivered', attempt_count = ?, response_code = ?, attempted_at = ?, next_attempt_at = NULL, last_error = NULL, updated_at = ? WHERE id = ?"
+    ),
+    markWebhookDeliveryRetry: db.prepare(
+      "UPDATE webhook_deliveries SET status = 'retrying', attempt_count = ?, response_code = ?, attempted_at = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE id = ?"
+    ),
+    markWebhookDeliveryFailed: db.prepare(
+      "UPDATE webhook_deliveries SET status = 'failed', attempt_count = ?, response_code = ?, attempted_at = ?, next_attempt_at = NULL, last_error = ?, updated_at = ? WHERE id = ?"
     ),
     listWebhookDeliveriesByWebhook: db.prepare(
-      "SELECT id, webhook_id AS webhookId, event_id AS eventId, status, response_code AS responseCode, attempted_at AS attemptedAt FROM webhook_deliveries WHERE webhook_id = ? ORDER BY attempted_at DESC"
+      "SELECT id, webhook_id AS webhookId, event_id AS eventId, payload_json AS payloadJson, status, attempt_count AS attemptCount, max_attempts AS maxAttempts, response_code AS responseCode, attempted_at AS attemptedAt, next_attempt_at AS nextAttemptAt, last_error AS lastError, created_at AS createdAt, updated_at AS updatedAt FROM webhook_deliveries WHERE webhook_id = ? ORDER BY updated_at DESC, id DESC"
     ),
     insertWorkspaceMetric: db.prepare(
       "INSERT INTO workspace_metrics(id, workspace_id, metric_key, metric_value, recorded_at) VALUES (?, ?, ?, ?, ?)"
@@ -322,15 +352,122 @@ export function createStorageRepositories(db) {
     },
     webhooks: {
       insert(record) {
-        insertRecord(statements.insertWebhook, record);
+        assertNoPlaintextSecrets(record);
+        const webhookRecord = {
+          id: record.id,
+          workspaceId: record.workspaceId,
+          endpointUrl: record.endpointUrl,
+          secretRef: record.secretRef ?? null,
+          enabled: record.enabled ?? 1,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt ?? record.createdAt,
+          breakerState: record.breakerState ?? "closed",
+          consecutiveFailures: record.consecutiveFailures ?? 0,
+          breakerNextAttemptAt: record.breakerNextAttemptAt ?? null
+        };
+        insertRecord(statements.insertWebhook, webhookRecord);
+      },
+      update(record) {
+        const result = statements.updateWebhook.run(
+          record.endpointUrl,
+          record.secretRef ?? null,
+          record.enabled,
+          record.updatedAt,
+          record.id
+        );
+        return result.changes > 0;
+      },
+      disable({ id, updatedAt }) {
+        const result = statements.disableWebhook.run(updatedAt, id);
+        return result.changes > 0;
+      },
+      updateBreaker({ id, breakerState, consecutiveFailures, breakerNextAttemptAt, updatedAt }) {
+        const result = statements.updateWebhookBreaker.run(
+          breakerState,
+          consecutiveFailures,
+          breakerNextAttemptAt,
+          updatedAt,
+          id
+        );
+        return result.changes > 0;
+      },
+      getById(id) {
+        return statements.getWebhookById.get(id) ?? null;
       },
       listByWorkspace(workspaceId) {
         return statements.listWebhooksByWorkspace.all(workspaceId);
+      },
+      listWithDeliverySummaryByWorkspace(workspaceId) {
+        return statements.listWebhooksWithDeliverySummaryByWorkspace.all(workspaceId);
       }
     },
     webhookDeliveries: {
+      enqueue(record) {
+        const deliveryRecord = {
+          id: record.id,
+          webhookId: record.webhookId,
+          eventId: record.eventId ?? null,
+          payloadJson: record.payloadJson,
+          status: record.status ?? "pending",
+          attemptCount: record.attemptCount ?? 0,
+          maxAttempts: record.maxAttempts ?? 5,
+          responseCode: record.responseCode ?? null,
+          attemptedAt: record.attemptedAt ?? record.createdAt,
+          nextAttemptAt: record.nextAttemptAt ?? record.createdAt,
+          lastError: record.lastError ?? null,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt ?? record.createdAt
+        };
+        insertRecord(statements.enqueueWebhookDelivery, deliveryRecord);
+      },
       insert(record) {
-        insertRecord(statements.insertWebhookDelivery, record);
+        this.enqueue(record);
+      },
+      listDue(nowIso, reclaimBeforeIsoOrLimit, maybeLimit) {
+        const reclaimBeforeIso = typeof maybeLimit === "number" ? reclaimBeforeIsoOrLimit : nowIso;
+        const limit = typeof maybeLimit === "number" ? maybeLimit : reclaimBeforeIsoOrLimit;
+        return statements.listDueWebhookDeliveries.all(nowIso, reclaimBeforeIso, nowIso, limit);
+      },
+      claim({ id, updatedAt, reclaimBeforeAt }) {
+        const result = statements.claimWebhookDelivery.run(
+          updatedAt,
+          id,
+          reclaimBeforeAt ?? updatedAt
+        );
+        return result.changes > 0;
+      },
+      markDelivered({ id, attemptCount, responseCode, attemptedAt, updatedAt }) {
+        const result = statements.markWebhookDeliveryDelivered.run(
+          attemptCount,
+          responseCode,
+          attemptedAt,
+          updatedAt,
+          id
+        );
+        return result.changes > 0;
+      },
+      markRetry({ id, attemptCount, responseCode, attemptedAt, nextAttemptAt, lastError, updatedAt }) {
+        const result = statements.markWebhookDeliveryRetry.run(
+          attemptCount,
+          responseCode,
+          attemptedAt,
+          nextAttemptAt,
+          lastError,
+          updatedAt,
+          id
+        );
+        return result.changes > 0;
+      },
+      markFailed({ id, attemptCount, responseCode, attemptedAt, lastError, updatedAt }) {
+        const result = statements.markWebhookDeliveryFailed.run(
+          attemptCount,
+          responseCode,
+          attemptedAt,
+          lastError,
+          updatedAt,
+          id
+        );
+        return result.changes > 0;
       },
       listByWebhook(webhookId) {
         return statements.listWebhookDeliveriesByWebhook.all(webhookId);

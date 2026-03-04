@@ -4,6 +4,7 @@ import { createControlApiRouter } from "../api/control/index.js";
 import { createReadApiRouter } from "../api/read/index.js";
 import { assertAuthorizedControlRequest } from "../middleware/auth-gate.js";
 import { HttpError, sendError, sendJson } from "../middleware/error-handler.js";
+import { createMonitorProvidersFromEnv } from "../monitoring/collectors.js";
 import { attachRequestId } from "../middleware/request-id.js";
 import { resolveBindConfig } from "./config.js";
 import { createWebhookOutboxWorker } from "../webhooks/outbox-worker.js";
@@ -58,7 +59,7 @@ function requestHandlerFactory({
         return;
       }
 
-      if (readRouter.handle(req, res, requestUrl)) {
+      if (await readRouter.handle(req, res, requestUrl)) {
         return;
       }
 
@@ -82,7 +83,7 @@ export function createDaemonServer({
   logger = console,
   repositories,
   statusProvider,
-  monitorProviders,
+  monitorProviders = createMonitorProvidersFromEnv(),
   webhookWorker,
   webhookWorkerOptions = {}
 } = {}) {

@@ -20,7 +20,7 @@ function extractSuffix(pathname, prefix) {
 
 export function createReadApiRouter({ repositories, statusProvider, monitorProviders }) {
   return {
-    handle(req, res, requestUrl) {
+    async handle(req, res, requestUrl) {
       if (req.method !== "GET") {
         return false;
       }
@@ -72,12 +72,12 @@ export function createReadApiRouter({ repositories, statusProvider, monitorProvi
       }
 
       if (pathname === "/api/monitors/workspaces") {
-        handleWorkspaceMonitorsRead(res, monitorProviders);
+        await handleWorkspaceMonitorsRead(res, monitorProviders, requestUrl.searchParams);
         return true;
       }
 
       if (pathname === "/api/monitors/openclaw") {
-        handleOpenclawMonitorRead(res, monitorProviders);
+        await handleOpenclawMonitorRead(res, monitorProviders);
         return true;
       }
 

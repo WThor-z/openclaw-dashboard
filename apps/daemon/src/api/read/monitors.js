@@ -1,17 +1,18 @@
 import { sendJson } from "../../middleware/error-handler.js";
 import { redactSecrets } from "./redaction.js";
 
-export function handleWorkspaceMonitorsRead(res, monitorProviders) {
+export async function handleWorkspaceMonitorsRead(res, monitorProviders, searchParams) {
+  const requestedPath = searchParams?.get("path") ?? undefined;
   const snapshot = monitorProviders?.workspaces
-    ? monitorProviders.workspaces()
+    ? await monitorProviders.workspaces({ path: requestedPath })
     : { items: [] };
 
   sendJson(res, 200, redactSecrets(snapshot));
 }
 
-export function handleOpenclawMonitorRead(res, monitorProviders) {
+export async function handleOpenclawMonitorRead(res, monitorProviders) {
   const snapshot = monitorProviders?.openclaw
-    ? monitorProviders.openclaw()
+    ? await monitorProviders.openclaw()
     : { snapshot: { status: "not_collected" } };
 
   sendJson(res, 200, redactSecrets(snapshot));

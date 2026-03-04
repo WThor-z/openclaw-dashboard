@@ -78,13 +78,16 @@ function insertRecord(statement, values) {
 export function createStorageRepositories(db) {
   const statements = {
     insertEvent: db.prepare(
-      "INSERT INTO events(id, session_id, workspace_id, level, kind, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO events(id, source, session_id, task_id, workspace_id, level, kind, payload_json, created_at, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ),
+    insertEventIfNotExists: db.prepare(
+      "INSERT OR IGNORE INTO events(id, source, session_id, task_id, workspace_id, level, kind, payload_json, created_at, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ),
     listEventsBySession: db.prepare(
-      "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt FROM events WHERE session_id = ? ORDER BY created_at DESC"
+      "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE session_id = ? ORDER BY created_at DESC"
     ),
     listTimelineByWorkspace: db.prepare(
-      "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt FROM events WHERE workspace_id = ? ORDER BY created_at DESC"
+      "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE workspace_id = ? ORDER BY created_at DESC"
     ),
     insertSession: db.prepare(
       "INSERT INTO sessions(id, workspace_id, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?)"
@@ -145,7 +148,61 @@ export function createStorageRepositories(db) {
   return {
     events: {
       insert(record) {
-        insertRecord(statements.insertEvent, record);
+        const eventRecord = {
+          id: record.id,
+          source: record?.source ?? "daemon",
+          sessionId: record?.sessionId ?? null,
+          taskId: record?.taskId ?? null,
+          workspaceId: record.workspaceId,
+          level: record.level,
+          kind: record.kind,
+          payloadJson: record.payloadJson,
+          createdAt: record.createdAt,
+          dedupeKey: record?.dedupeKey ?? null
+        };
+
+        assertNoPlaintextSecrets(eventRecord);
+        statements.insertEvent.run(
+          eventRecord.id,
+          eventRecord.source,
+          eventRecord.sessionId,
+          eventRecord.taskId,
+          eventRecord.workspaceId,
+          eventRecord.level,
+          eventRecord.kind,
+          eventRecord.payloadJson,
+          eventRecord.createdAt,
+          eventRecord.dedupeKey
+        );
+      },
+      insertIfNotExists(record) {
+        const eventRecord = {
+          id: record.id,
+          source: record?.source ?? "daemon",
+          sessionId: record?.sessionId ?? null,
+          taskId: record?.taskId ?? null,
+          workspaceId: record.workspaceId,
+          level: record.level,
+          kind: record.kind,
+          payloadJson: record.payloadJson,
+          createdAt: record.createdAt,
+          dedupeKey: record?.dedupeKey ?? null
+        };
+
+        assertNoPlaintextSecrets(eventRecord);
+        const result = statements.insertEventIfNotExists.run(
+          eventRecord.id,
+          eventRecord.source,
+          eventRecord.sessionId,
+          eventRecord.taskId,
+          eventRecord.workspaceId,
+          eventRecord.level,
+          eventRecord.kind,
+          eventRecord.payloadJson,
+          eventRecord.createdAt,
+          eventRecord.dedupeKey
+        );
+        return result.changes > 0;
       },
       listBySession(sessionId) {
         return statements.listEventsBySession.all(sessionId);

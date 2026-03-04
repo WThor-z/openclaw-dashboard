@@ -16,3 +16,5 @@
 
 - 2026-03-04: `pnpm test --filter gateway-sim` originally forwarded `--filter` to Vitest (unknown option) because it was treated as a script arg; fixed by routing root `test` through `scripts/test-entry.mjs` and lifting `--filter` into pnpm recursive args.
 - 2026-03-04: LSP diagnostics for JSON files are limited in this environment because configured `biome` LSP is not installed; TypeScript/JavaScript diagnostics still run clean for changed executable source files.
+
+- 2026-03-04: Task 6 evidence command `pnpm --filter @apps/daemon test -- test/ingest/pipeline.test.js -t "idempotent|malformed"` still executes full daemon suite under current script wiring; log remains valid but includes unrelated passing suites.

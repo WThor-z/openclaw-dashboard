@@ -89,11 +89,23 @@ export function createStorageRepositories(db) {
     listTimelineByWorkspace: db.prepare(
       "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE workspace_id = ? ORDER BY created_at DESC"
     ),
+    listEventsPage: db.prepare(
+      "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events ORDER BY created_at DESC, id DESC LIMIT ?"
+    ),
+    listEventsPageAfterCursor: db.prepare(
+      "SELECT id, source, session_id AS sessionId, task_id AS taskId, workspace_id AS workspaceId, level, kind, payload_json AS payloadJson, created_at AS createdAt, dedupe_key AS dedupeKey FROM events WHERE (created_at < ?) OR (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?"
+    ),
     insertSession: db.prepare(
       "INSERT INTO sessions(id, workspace_id, status, started_at, ended_at) VALUES (?, ?, ?, ?, ?)"
     ),
     listSessionsByWorkspace: db.prepare(
       "SELECT id, workspace_id AS workspaceId, status, started_at AS startedAt, ended_at AS endedAt FROM sessions WHERE workspace_id = ? ORDER BY started_at DESC"
+    ),
+    listSessions: db.prepare(
+      "SELECT id, workspace_id AS workspaceId, status, started_at AS startedAt, ended_at AS endedAt FROM sessions ORDER BY started_at DESC, id DESC"
+    ),
+    getSessionById: db.prepare(
+      "SELECT id, workspace_id AS workspaceId, status, started_at AS startedAt, ended_at AS endedAt FROM sessions WHERE id = ? LIMIT 1"
     ),
     insertTask: db.prepare(
       "INSERT INTO tasks(id, session_id, workspace_id, state, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -101,11 +113,20 @@ export function createStorageRepositories(db) {
     listTasksBySession: db.prepare(
       "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, state, summary, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE session_id = ? ORDER BY created_at DESC"
     ),
+    listTasks: db.prepare(
+      "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, state, summary, created_at AS createdAt, updated_at AS updatedAt FROM tasks ORDER BY updated_at DESC, id DESC"
+    ),
+    getTaskById: db.prepare(
+      "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, state, summary, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE id = ? LIMIT 1"
+    ),
     insertCostEntry: db.prepare(
       "INSERT INTO cost_entries(id, workspace_id, session_id, task_id, amount_usd, model, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ),
     listCostEntriesByWorkspace: db.prepare(
       "SELECT id, workspace_id AS workspaceId, session_id AS sessionId, task_id AS taskId, amount_usd AS amountUsd, model, recorded_at AS recordedAt FROM cost_entries WHERE workspace_id = ? ORDER BY recorded_at DESC"
+    ),
+    rollupDailyCosts: db.prepare(
+      "SELECT substr(recorded_at, 1, 10) AS date, round(sum(amount_usd), 6) AS amountUsd, count(*) AS entryCount FROM cost_entries GROUP BY substr(recorded_at, 1, 10) ORDER BY date DESC"
     ),
     insertConfigSnapshot: db.prepare(
       "INSERT INTO config_snapshots(id, workspace_id, source, snapshot_json, captured_at) VALUES (?, ?, ?, ?, ?)"
@@ -209,6 +230,18 @@ export function createStorageRepositories(db) {
       },
       listTimelineByWorkspace(workspaceId) {
         return statements.listTimelineByWorkspace.all(workspaceId);
+      },
+      listPage({ limit, cursor }) {
+        if (!cursor) {
+          return statements.listEventsPage.all(limit);
+        }
+
+        return statements.listEventsPageAfterCursor.all(
+          cursor.createdAt,
+          cursor.createdAt,
+          cursor.id,
+          limit
+        );
       }
     },
     sessions: {
@@ -217,6 +250,12 @@ export function createStorageRepositories(db) {
       },
       listByWorkspace(workspaceId) {
         return statements.listSessionsByWorkspace.all(workspaceId);
+      },
+      listAll() {
+        return statements.listSessions.all();
+      },
+      getById(id) {
+        return statements.getSessionById.get(id) ?? null;
       }
     },
     tasks: {
@@ -225,6 +264,12 @@ export function createStorageRepositories(db) {
       },
       listBySession(sessionId) {
         return statements.listTasksBySession.all(sessionId);
+      },
+      listAll() {
+        return statements.listTasks.all();
+      },
+      getById(id) {
+        return statements.getTaskById.get(id) ?? null;
       }
     },
     costEntries: {
@@ -233,6 +278,9 @@ export function createStorageRepositories(db) {
       },
       listByWorkspace(workspaceId) {
         return statements.listCostEntriesByWorkspace.all(workspaceId);
+      },
+      rollupDaily() {
+        return statements.rollupDailyCosts.all();
       }
     },
     configSnapshots: {

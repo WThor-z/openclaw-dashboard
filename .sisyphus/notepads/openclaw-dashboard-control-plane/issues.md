@@ -18,3 +18,4 @@
 - 2026-03-04: LSP diagnostics for JSON files are limited in this environment because configured `biome` LSP is not installed; TypeScript/JavaScript diagnostics still run clean for changed executable source files.
 
 - 2026-03-04: Task 6 evidence command `pnpm --filter @apps/daemon test -- test/ingest/pipeline.test.js -t "idempotent|malformed"` still executes full daemon suite under current script wiring; log remains valid but includes unrelated passing suites.
+- 2026-03-04: For Task 7 evidence, `pnpm --filter @apps/daemon test -- test/api/read/read-apis.test.js -t "rejects unbounded event limit"` still runs full suite under current package script, so error-path evidence includes broader passing output plus target-case coverage.

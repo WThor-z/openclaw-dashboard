@@ -1,23 +1,30 @@
 import { createServer } from "node:http";
 
+import { createReadApiRouter } from "../api/read/index.js";
 import { assertAuthorizedControlRequest } from "../middleware/auth-gate.js";
 import { HttpError, sendError, sendJson } from "../middleware/error-handler.js";
 import { attachRequestId } from "../middleware/request-id.js";
 import { resolveBindConfig } from "./config.js";
 
-function parsePathname(req) {
-  const requestUrl = new URL(req.url ?? "/", "http://localhost");
-  return requestUrl.pathname;
+function parseRequestUrl(req) {
+  return new URL(req.url ?? "/", "http://localhost");
 }
 
 function isControlRoute(pathname) {
   return pathname.startsWith("/api/control/");
 }
 
-function requestHandlerFactory({ adminToken, logger }) {
+function requestHandlerFactory({ adminToken, logger, repositories, statusProvider, monitorProviders }) {
+  const readRouter = createReadApiRouter({
+    repositories,
+    statusProvider,
+    monitorProviders
+  });
+
   return async function handleRequest(req, res) {
     const requestId = attachRequestId(req, res);
-    const pathname = parsePathname(req);
+    const requestUrl = parseRequestUrl(req);
+    const pathname = requestUrl.pathname;
     const startedAt = Date.now();
 
     res.on("finish", () => {
@@ -36,12 +43,7 @@ function requestHandlerFactory({ adminToken, logger }) {
         return;
       }
 
-      if (req.method === "GET" && pathname === "/api/status") {
-        sendJson(res, 200, {
-          ok: true,
-          connection: "local",
-          status: "idle"
-        });
+      if (readRouter.handle(req, res, requestUrl)) {
         return;
       }
 
@@ -61,10 +63,21 @@ export function createDaemonServer({
   host,
   port,
   adminToken = process.env.DASHBOARD_ADMIN_TOKEN,
-  logger = console
+  logger = console,
+  repositories,
+  statusProvider,
+  monitorProviders
 } = {}) {
   const bindConfig = resolveBindConfig({ host, port });
-  const server = createServer(requestHandlerFactory({ adminToken, logger }));
+  const server = createServer(
+    requestHandlerFactory({
+      adminToken,
+      logger,
+      repositories,
+      statusProvider,
+      monitorProviders
+    })
+  );
 
   return {
     start() {

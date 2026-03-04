@@ -250,6 +250,10 @@ export function createStorageRepositories(db) {
         );
       },
       getByDedupeKey(dedupeKey) {
+        if (typeof dedupeKey !== "string" || dedupeKey.length === 0) {
+          return null;
+        }
+
         return statements.getEventByDedupeKey.get(dedupeKey) ?? null;
       }
     },
@@ -281,6 +285,10 @@ export function createStorageRepositories(db) {
         return statements.getTaskById.get(id) ?? null;
       },
       updateState({ id, state, updatedAt }) {
+        if (typeof id !== "string" || id.length === 0) {
+          return false;
+        }
+
         const result = statements.updateTaskState.run(state, updatedAt, id);
         return result.changes > 0;
       }

@@ -133,6 +133,128 @@ describe("control write APIs", () => {
     expect(repositories.events.listTimelineByWorkspace("ws-1")).toHaveLength(initialEventCount);
   });
 
+  it("diffs and applies config with expected snapshot, operation, and audit side effects", async () => {
+    const repositories = createFixtureRepositories();
+    const workspaceId = "ws-1";
+    repositories.configSnapshots.insert({
+      id: "snapshot-seed",
+      workspaceId,
+      source: "seed",
+      snapshotJson: JSON.stringify({ model: "gpt-5" }),
+      capturedAt: "2026-03-04T10:00:00.000Z"
+    });
+
+    const initialSnapshotCount = repositories.configSnapshots.listByWorkspace(workspaceId).length;
+    const initialOperationCount = repositories.configOperations.listByWorkspace(workspaceId).length;
+
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const diffResponse = await fetch(`${baseUrl}/api/control/config/diff`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-config-diff-1"
+      },
+      body: JSON.stringify({
+        workspaceId,
+        config: { model: "gpt-5.3", temperature: 0.2 }
+      })
+    });
+    const diffBody = await diffResponse.json();
+
+    expect(diffResponse.status).toBe(200);
+    expect(diffBody.ok).toBe(true);
+    expect(diffBody.baseVersion).toBe(initialSnapshotCount);
+
+    const applyResponse = await fetch(`${baseUrl}/api/control/config/apply`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-config-apply-1"
+      },
+      body: JSON.stringify({
+        workspaceId,
+        baseVersion: diffBody.baseVersion,
+        config: { model: "gpt-5.3", temperature: 0.2 }
+      })
+    });
+    const applyBody = await applyResponse.json();
+
+    expect(applyResponse.status).toBe(200);
+    expect(applyBody).toEqual({ ok: true, workspaceId, version: initialSnapshotCount + 1 });
+    expect(repositories.configSnapshots.listByWorkspace(workspaceId)).toHaveLength(initialSnapshotCount + 1);
+    expect(repositories.configOperations.listByWorkspace(workspaceId)).toHaveLength(initialOperationCount + 1);
+    expect(
+      repositories
+        .events
+        .listTimelineByWorkspace(workspaceId)
+        .some((event) => event.kind === "control.config.apply")
+    ).toBe(true);
+  });
+
+  it("cancels an existing task", async () => {
+    const repositories = createFixtureRepositories();
+    repositories.tasks.insert({
+      id: "task-1",
+      sessionId: null,
+      workspaceId: "ws-1",
+      state: "queued",
+      summary: "queued task",
+      createdAt: "2026-03-04T10:00:00.000Z",
+      updatedAt: "2026-03-04T10:00:00.000Z"
+    });
+
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const response = await fetch(`${baseUrl}/api/control/tasks/task-1/cancel`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-cancel-1"
+      },
+      body: JSON.stringify({ workspaceId: "ws-1" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true, taskId: "task-1", state: "cancelled" });
+    expect(repositories.tasks.getById("task-1")?.state).toBe("cancelled");
+  });
+
+  it("returns TASK_NOT_FOUND when canceling a missing task", async () => {
+    const repositories = createFixtureRepositories();
+    const initialEventCount = repositories.events.listTimelineByWorkspace("ws-1").length;
+
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const response = await fetch(`${baseUrl}/api/control/tasks/task-missing/cancel`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-cancel-missing-1"
+      },
+      body: JSON.stringify({ workspaceId: "ws-1" })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.code).toBe("TASK_NOT_FOUND");
+    expect(repositories.events.listTimelineByWorkspace("ws-1")).toHaveLength(initialEventCount);
+  });
+
   it("blocks writes when daemon read-only safety mode is enabled", async () => {
     const repositories = createFixtureRepositories();
     const server = await startServer({ repositories, readOnlyMode: true });

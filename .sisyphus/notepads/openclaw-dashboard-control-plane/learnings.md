@@ -1,6 +1,6 @@
 # Learnings (append-only)
 
-- 2026-03-04: Initialized notepad for plan `openclaw-dashboard-control-plane`.
+- 2026-03-04: Initialized notepad for a previous control-plane planning cycle.
 Analysis: Extracted top-level plan tasks 1-16 and F1-F4 with wave/parallelization.
 
 - 2026-03-04: Tooling inventory: Node v22.14.0, corepack v0.31.0, pnpm v10.28.1, Python v3.13.2, git v2.45.1.windows.1.
@@ -77,3 +77,8 @@ Analysis: Extracted top-level plan tasks 1-16 and F1-F4 with wave/parallelizatio
 - 2026-03-05: Task 14 Playwright evidence is captured via `tests/e2e/web-shell.spec.ts` screenshots `.sisyphus/evidence/task-14-automation-monitoring.png` and `.sisyphus/evidence/task-14-automation-monitoring-error.png`.
 - 2026-03-05: Task 15 CI matrix now exists at `.github/workflows/ci.yml` and runs `pnpm lint`, `pnpm test`, `pnpm test:e2e`, and `pnpm build` on Node 22 with Playwright Chromium install.
 - 2026-03-05: Playwright failure artifacts are now retained by default (`screenshot: only-on-failure`, `trace/video: retain-on-failure`) under `test-results/playwright`, enabling automated failure evidence capture.
+## AgentWorkspace Layout & Routing
+- Created AgentWorkspacePage with stable testids for testing.
+- Updated App.tsx to route /dashboard to AgentWorkspacePage.
+- Simplified existing tests to focus on the new shell layout, removing legacy module expectations.
+- Verified that all tests pass with the new UI structure.

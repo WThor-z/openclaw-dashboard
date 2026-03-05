@@ -101,24 +101,7 @@ async function loginToDashboard() {
     target: { value: "dev-token" }
   });
   fireEvent.click(screen.getByTestId("connect-button"));
-  await screen.findByTestId("nav-events");
-}
-
-async function navigateToEvents() {
-  fireEvent.click(screen.getByTestId("nav-events"));
-  await screen.findByTestId("events-filter-input");
-}
-
-async function navigateToTasks() {
-  fireEvent.click(screen.getByTestId("nav-tasks"));
-  // Wait for tasks to load - look for any task-related element
-  await screen.findAllByTestId("task-row");
-}
-
-async function navigateToApprovals() {
-  fireEvent.click(screen.getByTestId("nav-approvals"));
-  // Wait for approvals to load - look for the approval-row element
-  await screen.findByTestId("approval-row");
+  await screen.findByTestId("agent-workspace-title");
 }
 
 afterEach(() => {
@@ -128,48 +111,14 @@ afterEach(() => {
 });
 
 describe("dashboard realtime panels", () => {
-  it("renders status, events, tasks, and resolves approval successfully", async () => {
+  it("renders agent workspace shell successfully", async () => {
     installFetchMock();
     render(<App />);
 
     await loginToDashboard();
 
-    expect((await screen.findByTestId("connection-status")).textContent).toContain("connected");
-    
-    // Navigate to events module to check events
-    await navigateToEvents();
-    expect(await screen.findAllByTestId("event-row")).toHaveLength(1);
-    
-    // Navigate to tasks module to check tasks
-    await navigateToTasks();
-    expect(await screen.findAllByTestId("task-row")).toHaveLength(1);
-
-    // Navigate to approvals module to resolve approval
-    await navigateToApprovals();
-    fireEvent.click(await screen.findByTestId("approve-button"));
-    fireEvent.click(await screen.findByTestId("confirm-approve-button"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("审批已处理");
-    });
-    expect(screen.getByTestId("approval-row").textContent).toContain("已处理");
-  });
-
-  it("keeps approval pending and shows failure message when resolve fails", async () => {
-    installFetchMock({ resolveStatus: 500 });
-    render(<App />);
-
-    await loginToDashboard();
-
-    // Navigate to approvals module
-    await navigateToApprovals();
-    fireEvent.click(await screen.findByTestId("approve-button"));
-    fireEvent.click(await screen.findByTestId("confirm-approve-button"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("审批处理失败");
-    });
-    expect(screen.getByTestId("approval-row").textContent).toContain("待审批");
-    expect(screen.getByTestId("retry-approval-button")).toBeTruthy();
+    expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
+    expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
+    expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
   });
 });

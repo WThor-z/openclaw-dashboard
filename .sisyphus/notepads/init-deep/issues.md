@@ -6,7 +6,7 @@ ripgrep (rg) command unavailable in environment (/usr/bin/bash: rg: command not 
 No .github/workflows, Makefile, pyproject.toml, or .editorconfig found.
 ## Uncertain cross-cutting patterns
 - Root AGENTS.md needed to capture conventions; currently no centralized root documentation. (Evidence: .sisyphus/notepads/init-deep/issues.md, reliability/README.md)
-- Consider integrating findings into root AGENTS.md via plan: .sisyphus/plans/openclaw-dashboard-control-plane.md. (Evidence: .sisyphus/plans/openclaw-dashboard-control-plane.md)
+- Consider integrating findings into root AGENTS.md via plan: .sisyphus/plans/openclaw-agent-workspace.md. (Evidence: .sisyphus/plans/openclaw-agent-workspace.md)
 
 ### Anomaly/Risks identified during initial deep structure scan
 - Packaging config missing at repository root (no pyproject.toml or setup.py). This could hinder packaging, CI, and reproducible installs for the library.

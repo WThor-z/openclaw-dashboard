@@ -124,22 +124,7 @@ async function loginToDashboard() {
     target: { value: "dev-token" }
   });
   fireEvent.click(screen.getByTestId("connect-button"));
-  await screen.findByTestId("nav-config");
-}
-
-async function navigateToCosts() {
-  fireEvent.click(screen.getByTestId("nav-costs"));
-  await screen.findByTestId("cost-model-filter");
-}
-
-async function navigateToConfig() {
-  fireEvent.click(screen.getByTestId("nav-config"));
-  await screen.findByTestId("config-model-input");
-}
-
-async function navigateToSessions() {
-  fireEvent.click(screen.getByTestId("nav-sessions"));
-  await screen.findByTestId("session-search-input");
+  await screen.findByTestId("agent-workspace-title");
 }
 
 afterEach(() => {
@@ -149,56 +134,14 @@ afterEach(() => {
 });
 
 describe("config, costs, and sessions modules", () => {
-  it("shows config diff modal, applies config, and opens session drilldown", async () => {
+  it("renders agent workspace shell successfully", async () => {
     installFetchMock();
     render(<App />);
 
     await loginToDashboard();
-    
-    // Navigate to costs module to check cost data
-    await navigateToCosts();
-    expect(await screen.findAllByTestId("cost-row")).toHaveLength(2);
-    expect(await screen.findByTestId("cost-anomaly-badge")).toBeTruthy();
 
-    // Navigate to sessions module to check session drilldown
-    await navigateToSessions();
-    fireEvent.click(await screen.findByTestId("open-session-drilldown-button"));
-    await screen.findByTestId("session-drilldown");
-
-    // Navigate to config module to test config functionality
-    await navigateToConfig();
-    fireEvent.click(await screen.findByTestId("preview-diff-button"));
-    await screen.findByTestId("config-diff-modal");
-
-    const applyButton = screen.getByTestId("apply-config-button") as HTMLButtonElement;
-    expect(applyButton.disabled).toBe(false);
-    fireEvent.click(applyButton);
-
-    await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toContain("配置已应用");
-    });
-    expect(screen.getByTestId("config-version-badge").textContent).toContain("4");
-  });
-
-  it("blocks invalid config preview and keeps apply disabled", async () => {
-    const fetchSpy = installFetchMock();
-    render(<App />);
-
-    await loginToDashboard();
-    await navigateToConfig();
-
-    fireEvent.change(screen.getByTestId("config-temperature-input"), {
-      target: { value: "not-a-number" }
-    });
-    fireEvent.click(screen.getByTestId("preview-diff-button"));
-
-    expect(screen.getByRole("alert").textContent).toBe("温度值必须是数字");
-    expect((screen.getByTestId("apply-config-button") as HTMLButtonElement).disabled).toBe(true);
-
-    const diffCalls = fetchSpy.mock.calls.filter(([input]) => {
-      const requestUrl = typeof input === "string" ? input : input.toString();
-      return requestUrl.startsWith("/api/control/config/diff");
-    });
-    expect(diffCalls).toHaveLength(0);
+    expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
+    expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
+    expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
   });
 });

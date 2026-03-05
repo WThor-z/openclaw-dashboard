@@ -23,3 +23,12 @@
 - 2026-03-04: Task 8 evidence commands with `pnpm --filter @apps/daemon test -- ... -t ...` still execute all daemon test files due current Vitest invocation shape in package script; targeted scenario output is present but bundled with full-suite pass lines.
 
 - 2026-03-05: For task-9 failure-path evidence, `pnpm --filter @apps/daemon test -- ... -t ...` still runs full suite and may hide selected-case names; switched to `pnpm --filter @apps/daemon exec vitest run ... --reporter=verbose` so `.sisyphus/evidence/task-9-webhooks-error.log` explicitly shows `WEBHOOK_NOT_FOUND` case execution.
+- 2026-03-05: Task 9 rerun still emits Node `node:sqlite` ExperimentalWarning in evidence logs; expected and non-blocking while runtime remains on Node 22 builtin sqlite.
+- 2026-03-05: Task 10 evidence runs still include Node `node:sqlite` ExperimentalWarning lines in both happy/error logs because read API tests initialize in-memory sqlite repositories; warning is expected and non-blocking.
+- 2026-03-05: Missing-directory behavior bug source: `realpath` fallback to `resolve` made a non-existent `.openclaw` path look present unless directory existence was explicitly checked with `stat().isDirectory()`.
+
+- 2026-03-05: `task()` delegations to category agents repeatedly failed to start within launcher timeout (`Status: error` after 30s), so Task 12 implementation was completed directly in main session with full verification commands.
+
+- 2026-03-05: Existing `pnpm test` root script only covers smoke/contracts and does not execute package-level web/daemon suites; task verification still needs explicit package runs (`pnpm --filter @apps/web test`, `pnpm --filter @apps/daemon test`) in addition to root checks.
+
+- 2026-03-05: Task 15 verification initially failed at `pnpm lint` because ESLint was parsing TS/TSX with Espree; resolved by adding `@typescript-eslint/parser` and a TS-specific parser block in `eslint.config.mjs`.

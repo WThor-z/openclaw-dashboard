@@ -15,7 +15,7 @@ describe("web shell auth", () => {
 
     fireEvent.click(screen.getByTestId("connect-button"));
 
-    expect(screen.getByRole("alert").textContent).toBe("Token is required");
+    expect(screen.getByRole("alert").textContent).toBe("⚠️ 请输入访问令牌");
   });
 
   it("connects and renders navigation without localStorage persistence", async () => {

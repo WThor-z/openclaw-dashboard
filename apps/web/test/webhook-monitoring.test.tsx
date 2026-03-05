@@ -242,6 +242,16 @@ async function loginToDashboard() {
   await screen.findByTestId("nav-webhooks");
 }
 
+async function navigateToWebhooks() {
+  fireEvent.click(screen.getByTestId("nav-webhooks"));
+  await screen.findByTestId("add-webhook-button");
+}
+
+async function navigateToMonitoring() {
+  fireEvent.click(screen.getByTestId("nav-monitoring"));
+  await screen.findByTestId("workspace-monitor-card");
+}
+
 async function createWebhookViaUi() {
   fireEvent.click(screen.getByTestId("add-webhook-button"));
   fireEvent.change(screen.getByTestId("webhook-endpoint-input"), {
@@ -269,10 +279,16 @@ describe("webhook center and monitoring", () => {
     render(<App />);
 
     await loginToDashboard();
+    await navigateToWebhooks();
     await createWebhookViaUi();
 
+    // Navigate to monitoring to check monitoring cards
+    await navigateToMonitoring();
     expect(await screen.findByTestId("workspace-monitor-card")).toBeTruthy();
     expect((await screen.findByTestId("openclaw-status-indicator")).textContent).toContain("ok");
+
+    // Navigate back to webhooks to send test event
+    await navigateToWebhooks();
 
     fireEvent.click(screen.getByTestId("send-test-event-button"));
     fireEvent.click(screen.getByText("View deliveries"));
@@ -288,6 +304,7 @@ describe("webhook center and monitoring", () => {
     render(<App />);
 
     await loginToDashboard();
+    await navigateToWebhooks();
     await createWebhookViaUi();
 
     fireEvent.click(screen.getByTestId("send-test-event-button"));

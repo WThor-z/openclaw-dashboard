@@ -57,3 +57,23 @@ Analysis: Extracted top-level plan tasks 1-16 and F1-F4 with wave/parallelizatio
 - 2026-03-05: Read + control webhook APIs are now wired under existing patterns (`POST /api/control/webhooks/*`, `GET /api/webhooks*`) with idempotency/audit behavior inherited from the control router and summary/history views sourced from repository joins.
 - 2026-03-05: Worker reliability hardening added stale-claim recovery: deliveries left in `in_progress` beyond lease timeout are reclaimed and retried so daemon restarts/crashes do not wedge outbox rows indefinitely.
 - 2026-03-05: Control API idempotency now includes an in-process per-dedupe-key lock around mutation execution, preventing same-key concurrent requests from applying side effects twice before replay state is persisted.
+- 2026-03-05: Task 9 verification rerun confirms daemon webhook suite still passes end-to-end (`11 files / 39 tests`), including worker signature, retry, breaker, and read/control API coverage after outbox wiring.
+- 2026-03-05: Task 10 monitoring collectors now scan allowlisted workspace roots only, emit metadata-only summaries (`fileCount`, `totalBytes`, hot-file recency, failure-marker presence), and normalize relative file paths to forward slashes for deterministic cross-platform assertions.
+- 2026-03-05: `/api/monitors/workspaces` now supports an optional `path` query but rejects traversal/out-of-root values with `PATH_NOT_ALLOWED`; `/api/monitors/openclaw` reports minimal health (`exists`, expected files, missing count) without exposing file contents.
+- 2026-03-05: Task 10 follow-up fixed `.openclaw` existence detection to use `stat(canonicalRoot).isDirectory()`; a resolvable but missing root no longer reports `exists: true`.
+- 2026-03-05: Added unit coverage for missing `.openclaw` root in `apps/daemon/test/monitoring/collectors.test.js`, asserting `snapshot.exists === false` while expected-file probes remain present and false.
+
+- 2026-03-05: Task 12 web UI now composes feature panels under `apps/web/src/features/{events,tasks,approvals}` and keeps dashboard wiring in `apps/web/src/pages/DashboardPage.tsx` with polling-based refresh (`/api/status`, `/api/events`, `/api/tasks`).
+- 2026-03-05: Approval flow in Task 12 uses explicit confirmation (`confirm-approve-button`), per-item mutation state, and idempotency-key headers against `/api/control/approvals/{id}/resolve`; success marks row resolved while failure keeps row pending and exposes retry affordance.
+- 2026-03-05: Task 12 automated evidence is generated via Playwright in `tests/e2e/web-shell.spec.ts` with route-level API mocking for happy/error scenarios and screenshots at `.sisyphus/evidence/task-12-realtime.png` + `.sisyphus/evidence/task-12-realtime-error.png`.
+
+- 2026-03-05: Task 13 added modular web panels for config, costs, and sessions under `apps/web/src/features/{config,costs,sessions}` while keeping orchestration/wiring in `apps/web/src/pages/DashboardPage.tsx`.
+- 2026-03-05: Config Center guardrail in UI now enforces diff-before-apply by tracking a draft fingerprint; `apply-config-button` remains disabled until `preview-diff-button` succeeds for the same draft.
+- 2026-03-05: Session explorer drilldown is implemented by selecting a session row and loading `/api/sessions/{id}` detail while timeline rows are filtered from current event stream by `sessionId`.
+- 2026-03-05: Task 13 evidence is captured in Playwright tests with screenshot artifacts `.sisyphus/evidence/task-13-config-cost-session.png` and `.sisyphus/evidence/task-13-config-cost-session-error.png`.
+
+- 2026-03-05: Task 14 introduced dedicated `WebhookCenterPanel` and `MonitoringPanel` modules under `apps/web/src/features/{webhooks,monitoring}`, including webhook create/update/disable/test flows and monitor cards with explicit redaction indicators.
+- 2026-03-05: Webhook UI maps delivery status `delivered -> succeeded` for operator readability and exposes delivery detail drawer with error reason plus retry action (`retry-delivery-button`).
+- 2026-03-05: Task 14 Playwright evidence is captured via `tests/e2e/web-shell.spec.ts` screenshots `.sisyphus/evidence/task-14-automation-monitoring.png` and `.sisyphus/evidence/task-14-automation-monitoring-error.png`.
+- 2026-03-05: Task 15 CI matrix now exists at `.github/workflows/ci.yml` and runs `pnpm lint`, `pnpm test`, `pnpm test:e2e`, and `pnpm build` on Node 22 with Playwright Chromium install.
+- 2026-03-05: Playwright failure artifacts are now retained by default (`screenshot: only-on-failure`, `trace/video: retain-on-failure`) under `test-results/playwright`, enabling automated failure evidence capture.

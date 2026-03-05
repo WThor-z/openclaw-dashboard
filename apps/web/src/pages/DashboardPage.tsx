@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../app/auth.js";
+import { DashboardSidebar } from "../components/DashboardSidebar.js";
+import { OverviewPanel } from "../components/OverviewPanel.js";
 import { ApprovalsPanel, type ApprovalItem } from "../features/approvals/ApprovalsPanel.js";
 import {
   ConfigCenterPanel,
@@ -17,30 +19,15 @@ import { TasksPanel, type TaskItem } from "../features/tasks/TasksPanel.js";
 import { MonitoringPanel } from "../features/monitoring/MonitoringPanel.js";
 import { WebhookCenterPanel } from "../features/webhooks/WebhookCenterPanel.js";
 
-const MODULE_NAV = [
-  { id: "events", label: "Events" },
-  { id: "tasks", label: "Tasks" },
-  { id: "approvals", label: "Approvals" },
-  { id: "config", label: "Config" },
-  { id: "costs", label: "Costs" },
-  { id: "sessions", label: "Sessions" },
-  { id: "webhooks", label: "Webhooks" },
-  { id: "monitoring", label: "Monitoring" }
-];
-
 function createIdempotencyKey(seed: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${seed}-${crypto.randomUUID()}`;
   }
-
   return `${seed}-${Date.now()}`;
 }
 
 function parseConfigDiff(value: unknown): ConfigDiffEntry[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
+  if (!Array.isArray(value)) return [];
   return value
     .filter((entry) => entry !== null && typeof entry === "object")
     .map((entry) => {
@@ -54,8 +41,12 @@ function parseConfigDiff(value: unknown): ConfigDiffEntry[] {
 }
 
 export function DashboardPage() {
-  const { signOut, token } = useAuth();
+  const { token } = useAuth();
+  const [activeModule, setActiveModule] = useState("overview");
   const [connectionStatus, setConnectionStatus] = useState("loading");
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  
+  // Data states
   const [eventFilter, setEventFilter] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -67,7 +58,8 @@ export function DashboardPage() {
   const [sessionToDate, setSessionToDate] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedSessionStatus, setSelectedSessionStatus] = useState<string | null>(null);
-
+  
+  // Config states
   const [configModelValue, setConfigModelValue] = useState("gpt-5.3");
   const [configTemperatureValue, setConfigTemperatureValue] = useState("0.2");
   const [configValidationError, setConfigValidationError] = useState<string | null>(null);
@@ -77,7 +69,8 @@ export function DashboardPage() {
   const [configVersion, setConfigVersion] = useState(0);
   const [isPreviewingConfig, setIsPreviewingConfig] = useState(false);
   const [isApplyingConfig, setIsApplyingConfig] = useState(false);
-
+  
+  // Approval states
   const [failedApprovalIds, setFailedApprovalIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [submittingApprovalId, setSubmittingApprovalId] = useState<string | null>(null);
@@ -87,16 +80,17 @@ export function DashboardPage() {
     [configModelValue, configTemperatureValue]
   );
 
+  // Data fetching
   const refreshReadPanels = useCallback(async () => {
     try {
       const [statusResponse, eventsResponse, tasksResponse, costsResponse, sessionsResponse] =
         await Promise.all([
-        fetch("/api/status"),
-        fetch("/api/events?limit=25"),
-        fetch("/api/tasks"),
-        fetch("/api/costs/daily"),
-        fetch("/api/sessions")
-      ]);
+          fetch("/api/status"),
+          fetch("/api/events?limit=25"),
+          fetch("/api/tasks"),
+          fetch("/api/costs/daily"),
+          fetch("/api/sessions")
+        ]);
 
       if (statusResponse.ok) {
         const statusBody = (await statusResponse.json()) as { status?: string };
@@ -173,6 +167,8 @@ export function DashboardPage() {
         };
         setSessions(sessionsBody.items ?? []);
       }
+      
+      setLastUpdate(new Date());
     } catch {
       setConnectionStatus("disconnected");
     }
@@ -184,19 +180,11 @@ export function DashboardPage() {
 
   useEffect(() => {
     let disposed = false;
-
     async function runInitialLoad() {
-      if (!disposed) {
-        await refreshReadPanels();
-      }
+      if (!disposed) await refreshReadPanels();
     }
-
     runInitialLoad();
-
-    const intervalId = window.setInterval(() => {
-      void refreshReadPanels();
-    }, 3000);
-
+    const intervalId = window.setInterval(() => void refreshReadPanels(), 3000);
     return () => {
       disposed = true;
       window.clearInterval(intervalId);
@@ -205,10 +193,7 @@ export function DashboardPage() {
 
   const visibleEvents = useMemo(() => {
     const normalizedFilter = eventFilter.trim().toLowerCase();
-    if (!normalizedFilter) {
-      return events;
-    }
-
+    if (!normalizedFilter) return events;
     return events.filter((entry) => {
       const searchable = `${entry.kind} ${entry.level} ${entry.source}`.toLowerCase();
       return searchable.includes(normalizedFilter);
@@ -234,27 +219,20 @@ export function DashboardPage() {
           body: JSON.stringify({ decision })
         });
 
-        if (!response.ok) {
-          throw new Error("Approval request failed");
-        }
+        if (!response.ok) throw new Error("Approval request failed");
 
         setApprovals((previous) =>
           previous.map((item) =>
-            item.id === approvalId
-              ? {
-                ...item,
-                status: "resolved"
-              }
-              : item
+            item.id === approvalId ? { ...item, status: "resolved" } : item
           )
         );
         setFailedApprovalIds((previous) => previous.filter((item) => item !== approvalId));
-        setStatusMessage("Approval resolved");
+        setStatusMessage("审批已处理");
       } catch {
         setFailedApprovalIds((previous) =>
           previous.includes(approvalId) ? previous : [...previous, approvalId]
         );
-        setStatusMessage("Approval failed");
+        setStatusMessage("审批处理失败");
       } finally {
         setSubmittingApprovalId(null);
       }
@@ -263,10 +241,7 @@ export function DashboardPage() {
   );
 
   const selectedTimeline = useMemo<SessionTimelineItem[]>(() => {
-    if (!selectedSessionId) {
-      return [];
-    }
-
+    if (!selectedSessionId) return [];
     return events
       .filter((entry) => entry.sessionId === selectedSessionId)
       .map((entry) => ({
@@ -280,46 +255,32 @@ export function DashboardPage() {
   const parseConfigDraft = useCallback(() => {
     const model = configModelValue.trim();
     if (!model) {
-      setConfigValidationError("Model is required");
+      setConfigValidationError("模型不能为空");
       return null;
     }
-
     const temperature = Number.parseFloat(configTemperatureValue);
     if (!Number.isFinite(temperature)) {
-      setConfigValidationError("Temperature must be numeric");
+      setConfigValidationError("温度值必须是数字");
       return null;
     }
-
     setConfigValidationError(null);
-    return {
-      model,
-      temperature
-    };
+    return { model, temperature };
   }, [configModelValue, configTemperatureValue]);
 
   const armWrites = useCallback(async () => {
     const response = await fetch("/api/control/arm", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${token ?? ""}`
-      }
+      headers: { authorization: `Bearer ${token ?? ""}` }
     });
-
-    if (!response.ok) {
-      throw new Error("Failed to arm writes");
-    }
+    if (!response.ok) throw new Error("启用写入失败");
   }, [token]);
 
   const previewConfigDiff = useCallback(async () => {
     const configDraft = parseConfigDraft();
-    if (!configDraft) {
-      return;
-    }
-
+    if (!configDraft) return;
     setIsPreviewingConfig(true);
     try {
       await armWrites();
-
       const response = await fetch("/api/control/config/diff", {
         method: "POST",
         headers: {
@@ -327,32 +288,21 @@ export function DashboardPage() {
           "content-type": "application/json",
           "idempotency-key": createIdempotencyKey("config-diff")
         },
-        body: JSON.stringify({
-          workspaceId: "global",
-          config: configDraft
-        })
+        body: JSON.stringify({ workspaceId: "global", config: configDraft })
       });
-
-      if (!response.ok) {
-        throw new Error("Failed config diff");
-      }
-
-      const body = (await response.json()) as {
-        baseVersion?: number;
-        diff?: unknown;
-      };
+      if (!response.ok) throw new Error("配置对比失败");
+      const body = (await response.json()) as { baseVersion?: number; diff?: unknown };
       const nextPreview: ConfigPreview = {
         baseVersion: Number(body.baseVersion ?? 0),
         diff: parseConfigDiff(body.diff)
       };
-
       setConfigPreview(nextPreview);
       setConfigPreviewOpen(true);
       setConfigVersion(nextPreview.baseVersion);
       setConfigPreviewDraftKey(configDraftKey);
-      setStatusMessage("Config diff ready");
+      setStatusMessage("配置对比已就绪");
     } catch {
-      setStatusMessage("Config preview failed");
+      setStatusMessage("配置预览失败");
     } finally {
       setIsPreviewingConfig(false);
     }
@@ -362,19 +312,12 @@ export function DashboardPage() {
     Boolean(configPreview) && configPreviewDraftKey === configDraftKey && !configValidationError;
 
   const applyConfig = useCallback(async () => {
-    if (!configPreview || !canApplyConfig) {
-      return;
-    }
-
+    if (!configPreview || !canApplyConfig) return;
     const configDraft = parseConfigDraft();
-    if (!configDraft) {
-      return;
-    }
-
+    if (!configDraft) return;
     setIsApplyingConfig(true);
     try {
       await armWrites();
-
       const response = await fetch("/api/control/config/apply", {
         method: "POST",
         headers: {
@@ -388,18 +331,14 @@ export function DashboardPage() {
           config: configDraft
         })
       });
-
-      if (!response.ok) {
-        throw new Error("Failed config apply");
-      }
-
+      if (!response.ok) throw new Error("应用配置失败");
       const body = (await response.json()) as { version?: number };
       const nextVersion = Number(body.version ?? configPreview.baseVersion + 1);
       setConfigVersion(nextVersion);
       setConfigPreviewOpen(false);
-      setStatusMessage("Config applied");
+      setStatusMessage("配置已应用");
     } catch {
-      setStatusMessage("Config apply failed");
+      setStatusMessage("配置应用失败");
     } finally {
       setIsApplyingConfig(false);
     }
@@ -409,9 +348,7 @@ export function DashboardPage() {
     setSelectedSessionId(sessionId);
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
-      if (!response.ok) {
-        throw new Error("Failed to load session detail");
-      }
+      if (!response.ok) throw new Error("加载会话详情失败");
       const body = (await response.json()) as { session?: { status?: string } };
       setSelectedSessionStatus(body.session?.status ?? null);
     } catch {
@@ -419,81 +356,259 @@ export function DashboardPage() {
     }
   }, []);
 
+  // Calculate stats for overview
+  const stats = useMemo(() => ({
+    totalEvents: events.length,
+    pendingTasks: tasks.filter(t => t.state === "queued" || t.state === "running").length,
+    pendingApprovals: approvals.filter(a => a.status === "pending").length,
+    todayCost: costDays.length > 0 ? costDays[costDays.length - 1].amountUsd : 0
+  }), [events, tasks, approvals, costDays]);
+
+  const renderModuleContent = () => {
+    switch (activeModule) {
+      case "overview":
+        return (
+          <>
+            <OverviewPanel stats={stats} />
+            <div className="content-grid content-grid-2">
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">
+                    <div className="card-icon blue">⚡</div>
+                    最近事件
+                  </div>
+                </div>
+                <div className="card-body">
+                  <EventsPanel 
+                    events={visibleEvents.slice(0, 5)} 
+                    filterValue={eventFilter} 
+                    onFilterChange={setEventFilter} 
+                  />
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">
+                    <div className="card-icon orange">✅</div>
+                    待审批
+                  </div>
+                </div>
+                <div className="card-body">
+                  <ApprovalsPanel
+                    approvals={approvals.slice(0, 3)}
+                    failedApprovalIds={new Set(failedApprovalIds)}
+                    submittingId={submittingApprovalId}
+                    onResolve={resolveApproval}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      case "events":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon blue">⚡</div>
+                事件时间线
+              </div>
+            </div>
+            <div className="card-body">
+              <EventsPanel 
+                events={visibleEvents} 
+                filterValue={eventFilter} 
+                onFilterChange={setEventFilter} 
+              />
+            </div>
+          </div>
+        );
+      case "tasks":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon orange">📋</div>
+                任务队列
+              </div>
+            </div>
+            <div className="card-body">
+              <TasksPanel tasks={tasks} />
+            </div>
+          </div>
+        );
+      case "approvals":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon green">✅</div>
+                审批管理
+              </div>
+            </div>
+            <div className="card-body">
+              <ApprovalsPanel
+                approvals={approvals}
+                failedApprovalIds={new Set(failedApprovalIds)}
+                submittingId={submittingApprovalId}
+                onResolve={resolveApproval}
+              />
+            </div>
+          </div>
+        );
+      case "config":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon blue">⚙️</div>
+                配置中心
+              </div>
+            </div>
+            <div className="card-body">
+              <ConfigCenterPanel
+                modelValue={configModelValue}
+                temperatureValue={configTemperatureValue}
+                currentVersion={configVersion}
+                validationError={configValidationError}
+                preview={configPreview}
+                previewOpen={configPreviewOpen}
+                canApply={canApplyConfig}
+                isPreviewing={isPreviewingConfig}
+                isApplying={isApplyingConfig}
+                onModelChange={(value) => { setConfigModelValue(value); setConfigValidationError(null); }}
+                onTemperatureChange={(value) => { setConfigTemperatureValue(value); setConfigValidationError(null); }}
+                onPreview={previewConfigDiff}
+                onApply={applyConfig}
+                onClosePreview={() => setConfigPreviewOpen(false)}
+              />
+            </div>
+          </div>
+        );
+      case "costs":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon red">💰</div>
+                成本分析
+              </div>
+            </div>
+            <div className="card-body">
+              <CostAnalyticsPanel days={costDays} />
+            </div>
+          </div>
+        );
+      case "sessions":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon blue">💬</div>
+                会话探索
+              </div>
+            </div>
+            <div className="card-body">
+              <SessionExplorerPanel
+                sessions={sessions}
+                searchValue={sessionSearch}
+                fromDate={sessionFromDate}
+                toDate={sessionToDate}
+                selectedSessionId={selectedSessionId}
+                selectedSessionStatus={selectedSessionStatus}
+                selectedTimeline={selectedTimeline}
+                onSearchChange={setSessionSearch}
+                onFromDateChange={setSessionFromDate}
+                onToDateChange={setSessionToDate}
+                onOpenDrilldown={(id) => void openSessionDrilldown(id)}
+              />
+            </div>
+          </div>
+        );
+      case "webhooks":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon orange">🔔</div>
+                Webhook 管理
+              </div>
+            </div>
+            <div className="card-body">
+              <WebhookCenterPanel token={token} />
+            </div>
+          </div>
+        );
+      case "monitoring":
+        return (
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">
+                <div className="card-icon green">📈</div>
+                系统监控
+              </div>
+            </div>
+            <div className="card-body">
+              <MonitoringPanel />
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
-    <main>
-      <header>
-        <h1>Control Plane</h1>
-        <p data-testid="connection-status">Connection: {connectionStatus}</p>
-        <button onClick={signOut} type="button">
-          Sign out
-        </button>
-      </header>
-      <nav aria-label="Dashboard modules">
-        <ul>
-          {MODULE_NAV.map((entry) => (
-            <li key={entry.id}>
-              <a data-testid={`nav-${entry.id}`} href="#" onClick={(event) => event.preventDefault()}>
-                {entry.label}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <EventsPanel events={visibleEvents} filterValue={eventFilter} onFilterChange={setEventFilter} />
-      <TasksPanel tasks={tasks} />
-      <ApprovalsPanel
-        approvals={approvals}
-        failedApprovalIds={new Set(failedApprovalIds)}
-        submittingId={submittingApprovalId}
-        onResolve={resolveApproval}
+    <div className="dashboard-layout">
+      <DashboardSidebar
+        activeModule={activeModule}
+        onModuleChange={setActiveModule}
+        connectionStatus={connectionStatus}
       />
-
-      <ConfigCenterPanel
-        modelValue={configModelValue}
-        temperatureValue={configTemperatureValue}
-        currentVersion={configVersion}
-        validationError={configValidationError}
-        preview={configPreview}
-        previewOpen={configPreviewOpen}
-        canApply={canApplyConfig}
-        isPreviewing={isPreviewingConfig}
-        isApplying={isApplyingConfig}
-        onModelChange={(nextValue) => {
-          setConfigModelValue(nextValue);
-          setConfigValidationError(null);
-        }}
-        onTemperatureChange={(nextValue) => {
-          setConfigTemperatureValue(nextValue);
-          setConfigValidationError(null);
-        }}
-        onPreview={previewConfigDiff}
-        onApply={applyConfig}
-        onClosePreview={() => setConfigPreviewOpen(false)}
-      />
-
-      <CostAnalyticsPanel days={costDays} />
-
-      <SessionExplorerPanel
-        sessions={sessions}
-        searchValue={sessionSearch}
-        fromDate={sessionFromDate}
-        toDate={sessionToDate}
-        selectedSessionId={selectedSessionId}
-        selectedSessionStatus={selectedSessionStatus}
-        selectedTimeline={selectedTimeline}
-        onSearchChange={setSessionSearch}
-        onFromDateChange={setSessionFromDate}
-        onToDateChange={setSessionToDate}
-        onOpenDrilldown={(sessionId) => {
-          void openSessionDrilldown(sessionId);
-        }}
-      />
-
-      <WebhookCenterPanel token={token} />
-
-      <MonitoringPanel />
-
-      {statusMessage ? <p role="status">{statusMessage}</p> : null}
-    </main>
+      
+      <main className="dashboard-main">
+        <header className="dashboard-header">
+          <div className="header-left">
+            <h1 className="header-title">
+              {activeModule === "overview" ? "控制面板" :
+               activeModule === "events" ? "事件管理" :
+               activeModule === "tasks" ? "任务队列" :
+               activeModule === "approvals" ? "审批中心" :
+               activeModule === "config" ? "配置中心" :
+               activeModule === "costs" ? "成本分析" :
+               activeModule === "sessions" ? "会话探索" :
+               activeModule === "webhooks" ? "Webhook 管理" :
+               activeModule === "monitoring" ? "系统监控" : "控制面板"}
+            </h1>
+          </div>
+          <div className="header-actions">
+            {lastUpdate && (
+              <span className="text-sm text-muted">
+                上次更新: {lastUpdate.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+        </header>
+        
+        <div className="dashboard-content">
+          {statusMessage && (
+            <div 
+              className={`alert ${statusMessage.includes("失败") ? "alert-error" : "alert-success"}`}
+              role="status"
+            >
+              {statusMessage}
+              <button 
+                className="btn btn-ghost btn-sm" 
+                onClick={() => setStatusMessage(null)}
+                style={{ marginLeft: "auto" }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          {renderModuleContent()}
+        </div>
+      </main>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { HttpError } from "../../middleware/error-handler.js";
 import { handleDailyCostsRead } from "./costs.js";
 import { handleEventsRead } from "./events.js";
 import {
+  handleGatewayMonitorRead,
   handleOpenclawMonitorRead,
   handleWorkspaceMonitorsRead
 } from "./monitors.js";
@@ -78,6 +79,11 @@ export function createReadApiRouter({ repositories, statusProvider, monitorProvi
 
       if (pathname === "/api/monitors/openclaw") {
         await handleOpenclawMonitorRead(res, monitorProviders);
+        return true;
+      }
+
+      if (pathname === "/api/monitors/gateway") {
+        await handleGatewayMonitorRead(res, monitorProviders);
         return true;
       }
 

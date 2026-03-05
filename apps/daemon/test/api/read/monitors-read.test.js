@@ -80,7 +80,32 @@ async function createFixtureTree() {
   await writeFile(path.join(workspaceOnePath, "logs", "error.log"), "boom", "utf8");
   await writeFile(path.join(workspaceOnePath, "build.json"), '{"ok":true}', "utf8");
   await writeFile(path.join(workspaceTwoPath, "src", "index.js"), "export const ready = true;", "utf8");
-  await writeFile(path.join(openclawPath, "state", "session-registry.json"), "{}", "utf8");
+  await writeFile(
+    path.join(openclawPath, "state", "session-registry.json"),
+    JSON.stringify(
+      {
+        sessions: [
+          {
+            id: "runtime-1",
+            agent: "agent-alpha",
+            workspacePath: workspaceOnePath,
+            status: "running",
+            updatedAt: "2026-03-05T11:59:00.000Z"
+          },
+          {
+            id: "runtime-2",
+            agent: "agent-beta",
+            workspacePath: workspaceTwoPath,
+            status: "completed",
+            updatedAt: "2026-03-05T11:55:00.000Z"
+          }
+        ]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
   await writeFile(path.join(openclawPath, "errors.json"), "{}", "utf8");
 
   const now = new Date();
@@ -122,6 +147,24 @@ describe("monitor read APIs", () => {
       status: "ok",
       exists: true,
       expectedFiles: expect.any(Array)
+    });
+
+    const gatewayResponse = await authorizedGet(`${baseUrl}/api/monitors/gateway`);
+    const gatewayBody = await gatewayResponse.json();
+
+    expect(gatewayResponse.status).toBe(200);
+    expect(gatewayBody.snapshot).toMatchObject({
+      status: "ok",
+      registryExists: true,
+      activeAgentCount: 1,
+      totalEntryCount: 2
+    });
+    expect(gatewayBody.snapshot.agents).toHaveLength(1);
+    expect(gatewayBody.snapshot.agents[0]).toMatchObject({
+      id: "runtime-1",
+      agent: "agent-alpha",
+      workspace: fixtures.workspaceOnePath,
+      state: "running"
     });
   });
 

@@ -111,6 +111,25 @@ function installFetchMock({ failingDeliveries = false }: MockOptions = {}) {
           }
         });
       }
+      if (requestUrl.startsWith("/api/monitors/gateway")) {
+        return createJsonResponse(200, {
+          snapshot: {
+            status: "ok",
+            registryExists: true,
+            activeAgentCount: 1,
+            totalEntryCount: 2,
+            agents: [
+              {
+                id: "runtime-1",
+                agent: "agent-a",
+                workspace: "/workspace/agent-a",
+                state: "running",
+                updatedAt: "2026-03-05T00:00:00.000Z"
+              }
+            ]
+          }
+        });
+      }
       if (requestUrl.startsWith("/api/webhooks?workspaceId=global")) {
         return createJsonResponse(200, {
           workspaceId: "global",
@@ -290,6 +309,8 @@ describe("webhook center and monitoring", () => {
     await navigateToMonitoring();
     expect(await screen.findByTestId("workspace-monitor-card")).toBeTruthy();
     expect((await screen.findByTestId("openclaw-status-indicator")).textContent).toContain("ok");
+    expect((await screen.findByTestId("gateway-status-indicator")).textContent).toContain("ok");
+    expect((await screen.findByTestId("gateway-agent-row")).textContent).toContain("agent-a");
 
     // Navigate back to webhooks to send test event
     await navigateToWebhooks();

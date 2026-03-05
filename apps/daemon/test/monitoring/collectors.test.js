@@ -78,4 +78,60 @@ describe("monitor collectors", () => {
       )
     ).toBe(true);
   });
+
+  it("extracts active agents and workspace mapping from session registry", async () => {
+    const baseDir = await mkdtemp(path.join(os.tmpdir(), "monitoring-openclaw-gateway-"));
+    temporaryDirectories.push(baseDir);
+
+    const openclawRoot = path.join(baseDir, ".openclaw");
+    await mkdir(path.join(openclawRoot, "state"), { recursive: true });
+    await writeFile(
+      path.join(openclawRoot, "state", "session-registry.json"),
+      JSON.stringify(
+        {
+          sessions: [
+            {
+              id: "runtime-1",
+              agent: "agent-alpha",
+              workspacePath: "/workspace/a",
+              status: "running",
+              updatedAt: "2026-03-05T12:00:00.000Z"
+            },
+            {
+              id: "runtime-2",
+              agent: "agent-beta",
+              workspacePath: "/workspace/b",
+              status: "completed",
+              updatedAt: "2026-03-05T11:59:00.000Z"
+            }
+          ]
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const providers = createMonitorProviders({
+      workspaceRoots: [],
+      openclawRoot,
+      now: () => new Date("2026-03-05T12:00:00.000Z")
+    });
+
+    const snapshot = await providers.gateway();
+
+    expect(snapshot.snapshot).toMatchObject({
+      status: "ok",
+      registryExists: true,
+      activeAgentCount: 1,
+      totalEntryCount: 2
+    });
+    expect(snapshot.snapshot.agents).toHaveLength(1);
+    expect(snapshot.snapshot.agents[0]).toMatchObject({
+      id: "runtime-1",
+      agent: "agent-alpha",
+      workspace: "/workspace/a",
+      state: "running"
+    });
+  });
 });

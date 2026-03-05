@@ -17,3 +17,19 @@ export async function handleOpenclawMonitorRead(res, monitorProviders) {
 
   sendJson(res, 200, redactSecrets(snapshot));
 }
+
+export async function handleGatewayMonitorRead(res, monitorProviders) {
+  const snapshot = monitorProviders?.gateway
+    ? await monitorProviders.gateway()
+    : {
+      snapshot: {
+        status: "not_collected",
+        registryExists: false,
+        activeAgentCount: 0,
+        totalEntryCount: 0,
+        agents: []
+      }
+    };
+
+  sendJson(res, 200, redactSecrets(snapshot));
+}

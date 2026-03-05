@@ -43,7 +43,7 @@ export function resolveBindConfig({
   const resolvedHost = normalizeHost(host);
   if (!allowPublicBind && !isLoopbackHost(resolvedHost)) {
     throw new Error(
-      `Refusing non-loopback bind host \"${resolvedHost}\". Set ALLOW_PUBLIC_BIND=1 to override.`
+      `Refusing non-loopback bind host "${resolvedHost}". Set ALLOW_PUBLIC_BIND=1 to override.`
     );
   }
 

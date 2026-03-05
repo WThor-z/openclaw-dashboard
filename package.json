@@ -9,8 +9,12 @@
     "test:gateway-sim": "vitest run tests/contracts/gateway-sim.test.ts",
     "test:e2e": "playwright test",
     "build": "tsc -p tsconfig.base.json --noEmit",
+    "ops:run": "node infra/ops/run-local.mjs",
+    "ops:backup": "node infra/ops/backup-export.mjs",
+    "ops:retention": "node infra/ops/retention-cleanup.mjs",
     "verify:env": "node infra/verify-env.mjs",
-    "verify:security": "node infra/verify-security.mjs"
+    "verify:security": "node infra/verify-security.mjs",
+    "verify:ops": "node infra/verify-ops.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",

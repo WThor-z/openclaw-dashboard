@@ -6,6 +6,7 @@ export type EventItem = {
   kind: string;
   level: string;
   source: string;
+  sessionId?: string | null;
 };
 
 type EventsPanelProps = {

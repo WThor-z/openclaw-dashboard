@@ -15,7 +15,7 @@ function createJsonResponse(status: number, body: unknown) {
   );
 }
 
-function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = {}) {
+function installFetchMock() {
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -25,7 +25,7 @@ function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = 
         return createJsonResponse(200, { ok: true, status: "connected" });
       }
 
-      if (requestUrl.startsWith("/api/events")) {
+      if (requestUrl.startsWith("/api/events?limit=25")) {
         return createJsonResponse(200, {
           items: [
             {
@@ -33,6 +33,7 @@ function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = 
               kind: "approval.requested",
               level: "info",
               source: "gateway",
+              sessionId: "session-1",
               createdAt: "2026-03-05T00:00:00.000Z",
               payload: {
                 approvalId: "approval-1",
@@ -51,7 +52,10 @@ function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = 
 
       if (requestUrl.startsWith("/api/costs/daily")) {
         return createJsonResponse(200, {
-          days: [{ date: "2026-03-05", amountUsd: 1.2, entryCount: 3, model: "gpt-5.3" }]
+          days: [
+            { date: "2026-03-05", amountUsd: 1.5, entryCount: 5, model: "gpt-5.3" },
+            { date: "2026-03-04", amountUsd: 0.4, entryCount: 2, model: "gpt-5.3" }
+          ]
         });
       }
 
@@ -81,11 +85,30 @@ function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = 
         });
       }
 
-      if (requestUrl.startsWith("/api/control/approvals/") && init?.method === "POST") {
-        if (resolveStatus >= 400) {
-          return createJsonResponse(resolveStatus, { code: "APPROVAL_FAILED" });
-        }
-        return createJsonResponse(200, { ok: true, resolved: true });
+      if (requestUrl.startsWith("/api/control/arm") && init?.method === "POST") {
+        return createJsonResponse(200, { ok: true, armed: true, armWindowMs: 30000 });
+      }
+
+      if (requestUrl.startsWith("/api/control/config/diff") && init?.method === "POST") {
+        return createJsonResponse(200, {
+          ok: true,
+          baseVersion: 3,
+          diff: [
+            {
+              path: "model",
+              before: "gpt-5",
+              after: "gpt-5.3"
+            }
+          ]
+        });
+      }
+
+      if (requestUrl.startsWith("/api/control/config/apply") && init?.method === "POST") {
+        return createJsonResponse(200, {
+          ok: true,
+          workspaceId: "global",
+          version: 4
+        });
       }
 
       return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
@@ -97,7 +120,7 @@ async function loginToDashboard() {
     target: { value: "dev-token" }
   });
   fireEvent.click(screen.getByTestId("connect-button"));
-  await screen.findByTestId("nav-events");
+  await screen.findByTestId("nav-config");
 }
 
 afterEach(() => {
@@ -106,39 +129,50 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("dashboard realtime panels", () => {
-  it("renders status, events, tasks, and resolves approval successfully", async () => {
+describe("config, costs, and sessions modules", () => {
+  it("shows config diff modal, applies config, and opens session drilldown", async () => {
     installFetchMock();
     render(<App />);
 
     await loginToDashboard();
 
-    expect((await screen.findByTestId("connection-status")).textContent).toContain("connected");
-    expect(await screen.findAllByTestId("event-row")).toHaveLength(1);
-    expect(await screen.findAllByTestId("task-row")).toHaveLength(1);
+    expect(await screen.findAllByTestId("cost-row")).toHaveLength(2);
+    expect(await screen.findByTestId("cost-anomaly-badge")).toBeTruthy();
 
-    fireEvent.click(await screen.findByTestId("approve-button"));
-    fireEvent.click(await screen.findByTestId("confirm-approve-button"));
+    fireEvent.click(await screen.findByTestId("open-session-drilldown-button"));
+    await screen.findByTestId("session-drilldown");
+
+    fireEvent.click(screen.getByTestId("preview-diff-button"));
+    await screen.findByTestId("config-diff-modal");
+
+    const applyButton = screen.getByTestId("apply-config-button") as HTMLButtonElement;
+    expect(applyButton.disabled).toBe(false);
+    fireEvent.click(applyButton);
 
     await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toBe("Approval resolved");
+      expect(screen.getByRole("status").textContent).toBe("Config applied");
     });
-    expect(screen.getByTestId("approval-row").textContent).toContain("resolved");
+    expect(screen.getByTestId("config-version-badge").textContent).toContain("4");
   });
 
-  it("keeps approval pending and shows failure message when resolve fails", async () => {
-    installFetchMock({ resolveStatus: 500 });
+  it("blocks invalid config preview and keeps apply disabled", async () => {
+    const fetchSpy = installFetchMock();
     render(<App />);
 
     await loginToDashboard();
 
-    fireEvent.click(await screen.findByTestId("approve-button"));
-    fireEvent.click(await screen.findByTestId("confirm-approve-button"));
-
-    await waitFor(() => {
-      expect(screen.getByRole("status").textContent).toBe("Approval failed");
+    fireEvent.change(screen.getByTestId("config-temperature-input"), {
+      target: { value: "not-a-number" }
     });
-    expect(screen.getByTestId("approval-row").textContent).toContain("pending");
-    expect(screen.getByTestId("retry-approval-button")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("preview-diff-button"));
+
+    expect(screen.getByRole("alert").textContent).toBe("Temperature must be numeric");
+    expect((screen.getByTestId("apply-config-button") as HTMLButtonElement).disabled).toBe(true);
+
+    const diffCalls = fetchSpy.mock.calls.filter(([input]) => {
+      const requestUrl = typeof input === "string" ? input : input.toString();
+      return requestUrl.startsWith("/api/control/config/diff");
+    });
+    expect(diffCalls).toHaveLength(0);
   });
 });

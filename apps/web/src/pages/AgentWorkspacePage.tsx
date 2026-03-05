@@ -1,10 +1,18 @@
 import React, { useState } from "react";
 import { AgentList } from "../components/AgentList";
 import { Agent } from "../components/AgentCard";
+import { useAuth } from "../app/auth";
+import { useAgentStatus } from "../hooks/useAgentStatus";
 
 export function AgentWorkspacePage() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const { token } = useAuth();
+  const selectedAgentStatus = useAgentStatus({
+    agentId: isDrawerOpen ? selectedAgent?.id ?? null : null,
+    token,
+    initialStatus: selectedAgent?.status ?? "offline"
+  });
 
   const handleAgentClick = (agent: Agent) => {
     setSelectedAgent(agent);
@@ -102,12 +110,12 @@ export function AgentWorkspacePage() {
                   <h3 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Status</h3>
                   <div className="flex items-center gap-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg p-4">
                     <span className={`status-indicator ${
-                      selectedAgent.status === "idle" ? "status-idle" :
-                      selectedAgent.status === "busy" ? "status-busy" :
-                      selectedAgent.status === "offline" ? "status-offline" :
+                      selectedAgentStatus === "idle" ? "status-idle" :
+                      selectedAgentStatus === "busy" ? "status-busy" :
+                      selectedAgentStatus === "offline" ? "status-offline" :
                       "status-error"
                     }`} />
-                    <span className="text-sm text-zinc-300 capitalize">{selectedAgent.status}</span>
+                    <span className="text-sm text-zinc-300 capitalize">{selectedAgentStatus}</span>
                   </div>
                 </section>
 

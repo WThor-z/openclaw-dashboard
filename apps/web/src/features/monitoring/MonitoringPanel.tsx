@@ -16,6 +16,23 @@ type OpenclawSnapshot = {
   expectedFiles?: Array<{ path: string; exists: boolean }>;
 };
 
+type GatewayAgentItem = {
+  id: string;
+  agent: string;
+  workspace: string;
+  state: string;
+  updatedAt?: string | null;
+};
+
+type GatewaySnapshot = {
+  status: string;
+  registryExists: boolean;
+  activeAgentCount: number;
+  totalEntryCount: number;
+  agents: GatewayAgentItem[];
+  parseError?: string;
+};
+
 type MonitoringPanelProps = {
   token: string | null;
 };
@@ -23,17 +40,23 @@ type MonitoringPanelProps = {
 export function MonitoringPanel({ token }: MonitoringPanelProps) {
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceSnapshotItem[]>([]);
   const [openclawSnapshot, setOpenclawSnapshot] = useState<OpenclawSnapshot | null>(null);
+  const [gatewaySnapshot, setGatewaySnapshot] = useState<GatewaySnapshot | null>(null);
   const [selectedWorkspace, setSelectedWorkspace] = useState<WorkspaceSnapshotItem | null>(null);
 
   const loadMonitoring = useCallback(async () => {
     try {
-      const [workspacesResponse, openclawResponse] = await Promise.all([
+      const [workspacesResponse, openclawResponse, gatewayResponse] = await Promise.all([
         fetch("/api/monitors/workspaces", {
           headers: {
             authorization: `Bearer ${token ?? ""}`
           }
         }),
         fetch("/api/monitors/openclaw", {
+          headers: {
+            authorization: `Bearer ${token ?? ""}`
+          }
+        }),
+        fetch("/api/monitors/gateway", {
           headers: {
             authorization: `Bearer ${token ?? ""}`
           }
@@ -53,9 +76,17 @@ export function MonitoringPanel({ token }: MonitoringPanelProps) {
         };
         setOpenclawSnapshot(openclawBody.snapshot ?? null);
       }
+
+      if (gatewayResponse.ok) {
+        const gatewayBody = (await gatewayResponse.json()) as {
+          snapshot?: GatewaySnapshot;
+        };
+        setGatewaySnapshot(gatewayBody.snapshot ?? null);
+      }
     } catch {
       setWorkspaceItems([]);
       setOpenclawSnapshot(null);
+      setGatewaySnapshot(null);
     }
   }, [token]);
 
@@ -82,6 +113,31 @@ export function MonitoringPanel({ token }: MonitoringPanelProps) {
       <p>
         Sensitive values: <span data-testid="redaction-indicator">[REDACTED]</span>
       </p>
+
+      <div>
+        <h3>Gateway Active Agents</h3>
+        <p data-testid="gateway-status-indicator">
+          Gateway status: {gatewaySnapshot?.status ?? "not_collected"}
+        </p>
+        <p>
+          Active agents: {gatewaySnapshot?.activeAgentCount ?? 0} / {gatewaySnapshot?.totalEntryCount ?? 0}
+        </p>
+        {gatewaySnapshot?.parseError ? <p role="alert">{gatewaySnapshot.parseError}</p> : null}
+        {(gatewaySnapshot?.agents?.length ?? 0) === 0 ? (
+          <p data-testid="gateway-empty-state">No active agents detected.</p>
+        ) : (
+          <ul>
+            {(gatewaySnapshot?.agents ?? []).map((entry) => (
+              <li data-testid="gateway-agent-row" key={`${entry.id}-${entry.workspace}`}>
+                <strong>{entry.agent}</strong> - {entry.workspace}
+                <div>State: {entry.state}</div>
+                <div>Runtime id: {entry.id}</div>
+                <div>Updated: {entry.updatedAt ?? "unknown"}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       <ul>
         {workspaceItems.map((item) => (

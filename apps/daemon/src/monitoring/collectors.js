@@ -1,12 +1,334 @@
-import { readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { HttpError } from "../middleware/error-handler.js";
 
 const WORKSPACE_FAILURE_MARKERS = new Set(["error.log", "crash.log", "errors.json"]);
-const OPENCLAW_EXPECTED_FILES = ["errors.json", path.join("state", "session-registry.json")];
+const OPENCLAW_SESSION_REGISTRY_PATH = path.join("state", "session-registry.json");
+const OPENCLAW_EXPECTED_FILES = ["errors.json", OPENCLAW_SESSION_REGISTRY_PATH];
 const DEFAULT_HOT_WINDOW_MINUTES = 30;
 const DEFAULT_HOT_FILES_LIMIT = 5;
+const RUNNING_STATE_MARKERS = new Set(["running", "active", "connected", "busy", "online"]);
+const STOPPED_STATE_MARKERS = new Set([
+  "stopped",
+  "completed",
+  "failed",
+  "cancelled",
+  "terminated",
+  "offline",
+  "closed"
+]);
+const REGISTRY_COLLECTION_KEYS = [
+  "sessions",
+  "activeSessions",
+  "sessionRegistry",
+  "registry",
+  "items",
+  "entries",
+  "records",
+  "agents",
+  "workers"
+];
+
+function isObjectRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readByPath(target, pathParts) {
+  let current = target;
+  for (const pathPart of pathParts) {
+    if (!isObjectRecord(current) || !(pathPart in current)) {
+      return null;
+    }
+    current = current[pathPart];
+  }
+
+  return current;
+}
+
+function pickStringByPaths(target, pathCandidates) {
+  for (const pathCandidate of pathCandidates) {
+    const nextValue = toNonEmptyString(readByPath(target, pathCandidate));
+    if (nextValue) {
+      return nextValue;
+    }
+  }
+
+  return null;
+}
+
+function pickBooleanByPaths(target, pathCandidates) {
+  for (const pathCandidate of pathCandidates) {
+    const value = readByPath(target, pathCandidate);
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true" || normalized === "1" || normalized === "yes") {
+        return true;
+      }
+      if (normalized === "false" || normalized === "0" || normalized === "no") {
+        return false;
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeState(rawState) {
+  const state = toNonEmptyString(rawState);
+  return state ? state.toLowerCase() : "unknown";
+}
+
+function collectObjectEntries(value) {
+  if (Array.isArray(value)) {
+    return value.filter((entry) => isObjectRecord(entry));
+  }
+
+  if (isObjectRecord(value)) {
+    return Object.values(value).filter((entry) => isObjectRecord(entry));
+  }
+
+  return [];
+}
+
+function looksLikeRegistryEntry(entry) {
+  if (!isObjectRecord(entry)) {
+    return false;
+  }
+
+  return Boolean(
+    pickStringByPaths(entry, [
+      ["id"],
+      ["sessionId"],
+      ["session_id"],
+      ["agent"],
+      ["agentId"],
+      ["agent_id"],
+      ["workspace"],
+      ["workspacePath"],
+      ["workspace_path"],
+      ["cwd"],
+      ["workingDirectory"],
+      ["working_directory"],
+      ["status"],
+      ["state"]
+    ])
+  );
+}
+
+function extractRegistryEntries(registryJson) {
+  if (Array.isArray(registryJson)) {
+    return registryJson.filter((entry) => isObjectRecord(entry));
+  }
+
+  if (!isObjectRecord(registryJson)) {
+    return [];
+  }
+
+  const discovered = [];
+  for (const key of REGISTRY_COLLECTION_KEYS) {
+    if (key in registryJson) {
+      discovered.push(...collectObjectEntries(registryJson[key]));
+    }
+  }
+
+  if (discovered.length > 0) {
+    return discovered;
+  }
+
+  const objectValues = Object.values(registryJson).filter((entry) => isObjectRecord(entry));
+  if (objectValues.length > 0 && objectValues.some((entry) => looksLikeRegistryEntry(entry))) {
+    return objectValues;
+  }
+
+  return looksLikeRegistryEntry(registryJson) ? [registryJson] : [];
+}
+
+function normalizeGatewayAgentEntry(entry) {
+  const id =
+    pickStringByPaths(entry, [["id"], ["sessionId"], ["session_id"], ["runtimeId"], ["runtime_id"]]) ??
+    "unknown";
+  const agent =
+    pickStringByPaths(entry, [
+      ["agent"],
+      ["agentId"],
+      ["agent_id"],
+      ["clientId"],
+      ["client_id"],
+      ["workerId"],
+      ["worker_id"],
+      ["source"]
+    ]) ?? "unknown-agent";
+  const workspace =
+    pickStringByPaths(entry, [
+      ["workspace"],
+      ["workspaceId"],
+      ["workspace_id"],
+      ["workspacePath"],
+      ["workspace_path"],
+      ["cwd"],
+      ["workingDirectory"],
+      ["working_directory"]
+    ]) ?? "unknown-workspace";
+  const state = normalizeState(
+    pickStringByPaths(entry, [["status"], ["state"], ["phase"], ["connection"], ["lifecycle"]])
+  );
+  const updatedAt =
+    pickStringByPaths(entry, [
+      ["updatedAt"],
+      ["updated_at"],
+      ["lastSeenAt"],
+      ["last_seen_at"],
+      ["heartbeatAt"],
+      ["heartbeat_at"],
+      ["createdAt"],
+      ["created_at"]
+    ]) ?? null;
+  const explicitActive = pickBooleanByPaths(entry, [
+    ["active"],
+    ["isActive"],
+    ["is_active"],
+    ["connected"],
+    ["isConnected"],
+    ["is_connected"],
+    ["running"],
+    ["isRunning"],
+    ["is_running"]
+  ]);
+  const hasEndedAt = Boolean(
+    pickStringByPaths(entry, [["endedAt"], ["ended_at"], ["finishedAt"], ["finished_at"], ["closedAt"], ["closed_at"]])
+  );
+
+  let isActive;
+  if (typeof explicitActive === "boolean") {
+    isActive = explicitActive;
+  } else if (RUNNING_STATE_MARKERS.has(state)) {
+    isActive = true;
+  } else if (STOPPED_STATE_MARKERS.has(state) || hasEndedAt) {
+    isActive = false;
+  } else {
+    isActive = true;
+  }
+
+  return {
+    id,
+    agent,
+    workspace,
+    state,
+    updatedAt,
+    isActive
+  };
+}
+
+async function collectGatewaySnapshot({ openclawRoot, now }) {
+  const collectedAt = now().toISOString();
+
+  if (typeof openclawRoot !== "string" || openclawRoot.length === 0) {
+    return {
+      snapshot: {
+        status: "not_configured",
+        registryExists: false,
+        activeAgentCount: 0,
+        totalEntryCount: 0,
+        agents: [],
+        collectedAt
+      }
+    };
+  }
+
+  const canonicalRoot = await canonicalizePath(openclawRoot);
+  if (!canonicalRoot) {
+    return {
+      snapshot: {
+        status: "degraded",
+        registryExists: false,
+        activeAgentCount: 0,
+        totalEntryCount: 0,
+        agents: [],
+        parseError: "openclaw root is invalid",
+        collectedAt
+      }
+    };
+  }
+
+  const registryPath = path.join(canonicalRoot, OPENCLAW_SESSION_REGISTRY_PATH);
+  let registryRaw;
+  try {
+    registryRaw = await readFile(registryPath, "utf8");
+  } catch {
+    return {
+      snapshot: {
+        status: "degraded",
+        registryExists: false,
+        activeAgentCount: 0,
+        totalEntryCount: 0,
+        agents: [],
+        parseError: "session registry file is missing",
+        collectedAt
+      }
+    };
+  }
+
+  let registryJson;
+  try {
+    registryJson = JSON.parse(registryRaw);
+  } catch {
+    return {
+      snapshot: {
+        status: "degraded",
+        registryExists: true,
+        activeAgentCount: 0,
+        totalEntryCount: 0,
+        agents: [],
+        parseError: "session registry file is not valid JSON",
+        collectedAt
+      }
+    };
+  }
+
+  const entries = extractRegistryEntries(registryJson);
+  const normalizedEntries = entries.map((entry) => normalizeGatewayAgentEntry(entry));
+  const activeAgents = normalizedEntries.filter((entry) => entry.isActive);
+  const dedupedActiveAgents = [];
+  const seen = new Set();
+  for (const entry of activeAgents) {
+    const dedupeKey = `${entry.id}::${entry.agent}::${entry.workspace}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    dedupedActiveAgents.push({
+      id: entry.id,
+      agent: entry.agent,
+      workspace: entry.workspace,
+      state: entry.state,
+      updatedAt: entry.updatedAt
+    });
+  }
+
+  return {
+    snapshot: {
+      status: dedupedActiveAgents.length > 0 ? "ok" : "idle",
+      registryExists: true,
+      activeAgentCount: dedupedActiveAgents.length,
+      totalEntryCount: normalizedEntries.length,
+      agents: dedupedActiveAgents,
+      collectedAt
+    }
+  };
+}
 
 function normalizePath(value) {
   if (typeof value !== "string" || value.length === 0) {
@@ -233,6 +555,9 @@ export function createMonitorProviders({
     },
     async openclaw() {
       return collectOpenclawSnapshot({ openclawRoot, now });
+    },
+    async gateway() {
+      return collectGatewaySnapshot({ openclawRoot, now });
     }
   };
 }

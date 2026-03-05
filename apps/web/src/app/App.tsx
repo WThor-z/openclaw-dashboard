@@ -1,0 +1,51 @@
+import React, { type ReactNode } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+
+import { DashboardPage } from "../pages/DashboardPage.js";
+import { LoginPage } from "../pages/LoginPage.js";
+import { AuthProvider, useAuth } from "./auth.js";
+
+function RootRedirect() {
+  const { token } = useAuth();
+  return <Navigate replace to={token ? "/dashboard" : "/login"} />;
+}
+
+function LoginRoute() {
+  const { token } = useAuth();
+  if (token) {
+    return <Navigate replace to="/dashboard" />;
+  }
+
+  return <LoginPage />;
+}
+
+function ProtectedRoute({ children }: { children: ReactNode }) {
+  const { token } = useAuth();
+  if (!token) {
+    return <Navigate replace to="/login" />;
+  }
+
+  return children;
+}
+
+export function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<RootRedirect />} path="/" />
+          <Route element={<LoginRoute />} path="/login" />
+          <Route
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+            path="/dashboard"
+          />
+          <Route element={<RootRedirect />} path="*" />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}

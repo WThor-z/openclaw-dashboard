@@ -62,27 +62,35 @@ export function LoginPage() {
     }
 
     setIsLoading(true);
-    
+
     try {
-      // Try to verify the token by making a test request
-      const response = await fetch("/api/status", {
+      const response = await fetch("/api/auth/check", {
         headers: {
-          "Authorization": `Bearer ${normalizedToken}`
+          authorization: `Bearer ${normalizedToken}`
         }
       });
-      
-      if (!response.ok && response.status === 401) {
-        setError("访问令牌无效，请检查后重试");
-        setIsLoading(false);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError("访问令牌无效，请检查后重试");
+        } else {
+          setError("令牌验证失败，请稍后重试");
+        }
         return;
       }
-      
+
+      const body = (await response.json()) as { ok?: boolean; authorized?: boolean };
+      if (!body.ok || !body.authorized) {
+        setError("访问令牌无效，请检查后重试");
+        return;
+      }
+
       signIn(normalizedToken);
       navigate("/dashboard");
-    } catch (err) {
-      // If server is not responding, still allow login (will show disconnected state)
-      signIn(normalizedToken);
-      navigate("/dashboard");
+    } catch {
+      setError("无法验证访问令牌，请确认 daemon 已启动");
+    } finally {
+      setIsLoading(false);
     }
   }
 

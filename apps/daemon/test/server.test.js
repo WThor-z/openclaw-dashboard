@@ -28,6 +28,7 @@ async function startServer(options = {}) {
     host: "127.0.0.1",
     port: 0,
     adminToken: options.adminToken,
+    readAuthEnabled: options.readAuthEnabled,
     logger
   });
   await server.start();
@@ -41,6 +42,16 @@ describe("daemon bind config", () => {
 
     expect(config.host).toBe("127.0.0.1");
     expect(config.port).toBe(4060);
+  });
+
+  it("rejects non-loopback bind host by default", () => {
+    expect(() => resolveBindConfig({ host: "0.0.0.0" })).toThrow(/ALLOW_PUBLIC_BIND=1/);
+  });
+
+  it("allows public bind host with explicit override", () => {
+    const config = resolveBindConfig({ host: "0.0.0.0", allowPublicBind: true });
+
+    expect(config.host).toBe("0.0.0.0");
   });
 });
 
@@ -92,6 +103,69 @@ describe("daemon routes", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual({ ok: true, armed: true });
+  });
+
+  it("blocks unauthenticated read requests by default", async () => {
+    const server = await startServer({ adminToken: "dev-token" });
+    const baseUrl = endpointFrom(server.address());
+
+    const response = await fetch(`${baseUrl}/api/status`);
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.code).toBe("UNAUTHORIZED");
+  });
+
+  it("allows authenticated read requests by default", async () => {
+    const server = await startServer({ adminToken: "dev-token" });
+    const baseUrl = endpointFrom(server.address());
+
+    const response = await fetch(`${baseUrl}/api/status`, {
+      headers: {
+        authorization: "Bearer dev-token"
+      }
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+  });
+
+  it("allows unauthenticated read requests when read auth is disabled", async () => {
+    const server = await startServer({ adminToken: "dev-token", readAuthEnabled: false });
+    const baseUrl = endpointFrom(server.address());
+
+    const response = await fetch(`${baseUrl}/api/status`);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("validates token via /api/auth/check", async () => {
+    const server = await startServer({ adminToken: "dev-token" });
+    const baseUrl = endpointFrom(server.address());
+
+    const unauthorizedResponse = await fetch(`${baseUrl}/api/auth/check`);
+    expect(unauthorizedResponse.status).toBe(401);
+
+    const authorizedResponse = await fetch(`${baseUrl}/api/auth/check`, {
+      headers: {
+        authorization: "Bearer dev-token"
+      }
+    });
+    const body = await authorizedResponse.json();
+    expect(authorizedResponse.status).toBe(200);
+    expect(body).toEqual({ ok: true, authorized: true, authRequired: true });
+  });
+
+  it("returns authorized probe when read auth is disabled", async () => {
+    const server = await startServer({ adminToken: "dev-token", readAuthEnabled: false });
+    const baseUrl = endpointFrom(server.address());
+
+    const response = await fetch(`${baseUrl}/api/auth/check`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true, authorized: true, authRequired: false });
   });
 
   it("logs request id for handled requests", async () => {

@@ -7,6 +7,7 @@ import { createStorageRepositories } from "../../../src/storage/repositories.js"
 
 const activeServers = [];
 const openDatabases = [];
+const READ_TOKEN = "dev-token";
 
 afterEach(async () => {
   while (activeServers.length > 0) {
@@ -36,6 +37,7 @@ async function startServer({ repositories } = {}) {
   const server = createDaemonServer({
     host: "127.0.0.1",
     port: 0,
+    adminToken: READ_TOKEN,
     logger: { info() {}, error() {} },
     repositories,
     webhookWorker: {
@@ -46,6 +48,14 @@ async function startServer({ repositories } = {}) {
   await server.start();
   activeServers.push(server);
   return server;
+}
+
+function authorizedGet(url) {
+  return fetch(url, {
+    headers: {
+      authorization: `Bearer ${READ_TOKEN}`
+    }
+  });
 }
 
 describe("read webhook APIs", () => {
@@ -80,24 +90,28 @@ describe("read webhook APIs", () => {
     const server = await startServer({ repositories });
     const baseUrl = endpointFrom(server.address());
 
-    const summaryResponse = await fetch(`${baseUrl}/api/webhooks?workspaceId=ws-1`);
+    const summaryResponse = await authorizedGet(`${baseUrl}/api/webhooks?workspaceId=ws-1`);
     const summaryBody = await summaryResponse.json();
 
     expect(summaryResponse.status).toBe(200);
     expect(summaryBody.items).toHaveLength(1);
     expect(summaryBody.items[0]).toMatchObject({
       id: "wh-1",
+      hasSecretRef: true,
       lastStatus: "retrying",
       lastAttemptCount: 2,
       nextAttemptAt: "2026-03-05T02:00:10.000Z"
     });
+    expect(summaryBody.items[0].secretRef).toBeUndefined();
 
-    const historyResponse = await fetch(
+    const historyResponse = await authorizedGet(
       `${baseUrl}/api/webhooks/${encodeURIComponent("wh-1")}/deliveries`
     );
     const historyBody = await historyResponse.json();
 
     expect(historyResponse.status).toBe(200);
+    expect(historyBody.webhook.secretRef).toBeUndefined();
+    expect(historyBody.webhook.hasSecretRef).toBe(true);
     expect(historyBody.items).toHaveLength(1);
     expect(historyBody.items[0]).toMatchObject({
       id: "delivery-1",

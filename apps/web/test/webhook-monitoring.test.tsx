@@ -23,7 +23,7 @@ function installFetchMock({ failingDeliveries = false }: MockOptions = {}) {
   const webhooks: Array<{
     id: string;
     endpointUrl: string;
-    secretRef: string;
+    hasSecretRef: boolean;
     enabled: number;
     lastStatus?: string | null;
   }> = [];
@@ -44,6 +44,10 @@ function installFetchMock({ failingDeliveries = false }: MockOptions = {}) {
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
+
+      if (requestUrl.startsWith("/api/auth/check")) {
+        return createJsonResponse(200, { ok: true, authorized: true });
+      }
 
       if (requestUrl.startsWith("/api/status")) {
         return createJsonResponse(200, { ok: true, status: "connected" });
@@ -132,7 +136,7 @@ function installFetchMock({ failingDeliveries = false }: MockOptions = {}) {
         webhooks.unshift({
           id: webhookId,
           endpointUrl: parsed.endpointUrl ?? "",
-          secretRef: parsed.secretRef ?? "",
+          hasSecretRef: Boolean(parsed.secretRef),
           enabled: 1,
           lastStatus: null
         });
@@ -152,7 +156,7 @@ function installFetchMock({ failingDeliveries = false }: MockOptions = {}) {
         const target = webhooks.find((entry) => entry.id === webhookId);
         if (target) {
           target.endpointUrl = parsed.endpointUrl ?? target.endpointUrl;
-          target.secretRef = parsed.secretRef ?? target.secretRef;
+          target.hasSecretRef = parsed.secretRef ? true : target.hasSecretRef;
           target.enabled = parsed.enabled === false ? 0 : 1;
         }
         return createJsonResponse(200, { ok: true, webhookId, enabled: target?.enabled === 1 });

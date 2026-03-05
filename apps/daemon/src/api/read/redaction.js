@@ -1,4 +1,5 @@
-const SECRET_KEY_PATTERN = /(token|secret)/i;
+const SECRET_KEY_PATTERN =
+  /(token|secret|password|passwd|pwd|api[_-]?key|apikey|authorization|auth|cookie|set[_-]?cookie|private[_-]?key|privatekey|credential|bearer|session|sessionid|csrf|xsrf|passphrase|proxy|sid|salt|cert|access[_-]?key|accesskey)/i;
 
 function isObjectRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);

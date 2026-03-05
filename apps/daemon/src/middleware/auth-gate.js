@@ -1,6 +1,6 @@
 import { HttpError } from "./error-handler.js";
 
-function tokenFromAuthorizationHeader(authorization) {
+export function tokenFromAuthorizationHeader(authorization) {
   if (typeof authorization !== "string") {
     return null;
   }
@@ -10,10 +10,18 @@ function tokenFromAuthorizationHeader(authorization) {
   return match ? match[1] : null;
 }
 
-export function assertAuthorizedControlRequest(req, adminToken) {
+function assertAuthorizedRequest(req, adminToken) {
   const suppliedToken = tokenFromAuthorizationHeader(req.headers.authorization);
 
   if (!adminToken || suppliedToken !== adminToken) {
     throw new HttpError(401, "UNAUTHORIZED", "Bearer token is required");
   }
+}
+
+export function assertAuthorizedControlRequest(req, adminToken) {
+  assertAuthorizedRequest(req, adminToken);
+}
+
+export function assertAuthorizedReadRequest(req, adminToken) {
+  assertAuthorizedRequest(req, adminToken);
 }

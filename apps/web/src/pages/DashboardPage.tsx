@@ -80,16 +80,21 @@ export function DashboardPage() {
     [configModelValue, configTemperatureValue]
   );
 
+  const authHeaders = useMemo(
+    () => ({ authorization: `Bearer ${token ?? ""}` }),
+    [token]
+  );
+
   // Data fetching
   const refreshReadPanels = useCallback(async () => {
     try {
       const [statusResponse, eventsResponse, tasksResponse, costsResponse, sessionsResponse] =
         await Promise.all([
-          fetch("/api/status"),
-          fetch("/api/events?limit=25"),
-          fetch("/api/tasks"),
-          fetch("/api/costs/daily"),
-          fetch("/api/sessions")
+          fetch("/api/status", { headers: authHeaders }),
+          fetch("/api/events?limit=25", { headers: authHeaders }),
+          fetch("/api/tasks", { headers: authHeaders }),
+          fetch("/api/costs/daily", { headers: authHeaders }),
+          fetch("/api/sessions", { headers: authHeaders })
         ]);
 
       if (statusResponse.ok) {
@@ -172,7 +177,7 @@ export function DashboardPage() {
     } catch {
       setConnectionStatus("disconnected");
     }
-  }, []);
+  }, [authHeaders]);
 
   useEffect(() => {
     setConfigPreviewDraftKey(null);
@@ -347,14 +352,16 @@ export function DashboardPage() {
   const openSessionDrilldown = useCallback(async (sessionId: string) => {
     setSelectedSessionId(sessionId);
     try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        headers: authHeaders
+      });
       if (!response.ok) throw new Error("加载会话详情失败");
       const body = (await response.json()) as { session?: { status?: string } };
       setSelectedSessionStatus(body.session?.status ?? null);
     } catch {
       setSelectedSessionStatus("unknown");
     }
-  }, []);
+  }, [authHeaders]);
 
   // Calculate stats for overview
   const stats = useMemo(() => ({
@@ -549,7 +556,7 @@ export function DashboardPage() {
               </div>
             </div>
             <div className="card-body">
-              <MonitoringPanel />
+              <MonitoringPanel token={token} />
             </div>
           </div>
         );

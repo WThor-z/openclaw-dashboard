@@ -32,13 +32,14 @@ function createFixtureRepositories() {
   return createStorageRepositories(db);
 }
 
-async function startServer({ repositories } = {}) {
+async function startServer({ repositories, webhookEndpointPolicy } = {}) {
   const server = createDaemonServer({
     host: "127.0.0.1",
     port: 0,
     adminToken: "dev-token",
     logger: { info() {}, error() {} },
-    repositories
+    repositories,
+    webhookEndpointPolicy
   });
   await server.start();
   activeServers.push(server);
@@ -58,7 +59,12 @@ async function armWrites(baseUrl) {
 describe("control webhook APIs", () => {
   it("creates, updates, disables, and enqueues webhook deliveries", async () => {
     const repositories = createFixtureRepositories();
-    const server = await startServer({ repositories });
+    const server = await startServer({
+      repositories,
+      webhookEndpointPolicy: {
+        resolveHostname: async () => ["93.184.216.34"]
+      }
+    });
     const baseUrl = endpointFrom(server.address());
 
     await armWrites(baseUrl);
@@ -172,5 +178,88 @@ describe("control webhook APIs", () => {
 
     expect(response.status).toBe(404);
     expect(body.code).toBe("WEBHOOK_NOT_FOUND");
+  });
+
+  it("rejects non-https webhook endpoint URLs", async () => {
+    const repositories = createFixtureRepositories();
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const response = await fetch(`${baseUrl}/api/control/webhooks/create`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-wh-create-insecure-protocol"
+      },
+      body: JSON.stringify({
+        workspaceId: "ws-1",
+        endpointUrl: "http://receiver.test/webhook",
+        secretRef: "WH_SECRET"
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("ENDPOINT_URL_PROTOCOL_FORBIDDEN");
+  });
+
+  it("rejects private network webhook endpoint URLs", async () => {
+    const repositories = createFixtureRepositories();
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const response = await fetch(`${baseUrl}/api/control/webhooks/create`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-wh-create-private-ip"
+      },
+      body: JSON.stringify({
+        workspaceId: "ws-1",
+        endpointUrl: "https://169.254.169.254/latest/meta-data",
+        secretRef: "WH_SECRET"
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("ENDPOINT_URL_PRIVATE_IP_FORBIDDEN");
+  });
+
+  it("rejects hostnames that resolve to private addresses", async () => {
+    const repositories = createFixtureRepositories();
+    const server = await startServer({
+      repositories,
+      webhookEndpointPolicy: {
+        resolveHostname: async () => ["127.0.0.1"]
+      }
+    });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const response = await fetch(`${baseUrl}/api/control/webhooks/create`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer dev-token",
+        "content-type": "application/json",
+        "idempotency-key": "idem-wh-create-private-hostname"
+      },
+      body: JSON.stringify({
+        workspaceId: "ws-1",
+        endpointUrl: "https://safe.example/webhook",
+        secretRef: "WH_SECRET"
+      })
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.code).toBe("ENDPOINT_URL_PRIVATE_IP_FORBIDDEN");
   });
 });

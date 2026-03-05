@@ -16,7 +16,11 @@ type OpenclawSnapshot = {
   expectedFiles?: Array<{ path: string; exists: boolean }>;
 };
 
-export function MonitoringPanel() {
+type MonitoringPanelProps = {
+  token: string | null;
+};
+
+export function MonitoringPanel({ token }: MonitoringPanelProps) {
   const [workspaceItems, setWorkspaceItems] = useState<WorkspaceSnapshotItem[]>([]);
   const [openclawSnapshot, setOpenclawSnapshot] = useState<OpenclawSnapshot | null>(null);
   const [selectedWorkspace, setSelectedWorkspace] = useState<WorkspaceSnapshotItem | null>(null);
@@ -24,8 +28,16 @@ export function MonitoringPanel() {
   const loadMonitoring = useCallback(async () => {
     try {
       const [workspacesResponse, openclawResponse] = await Promise.all([
-        fetch("/api/monitors/workspaces"),
-        fetch("/api/monitors/openclaw")
+        fetch("/api/monitors/workspaces", {
+          headers: {
+            authorization: `Bearer ${token ?? ""}`
+          }
+        }),
+        fetch("/api/monitors/openclaw", {
+          headers: {
+            authorization: `Bearer ${token ?? ""}`
+          }
+        })
       ]);
 
       if (workspacesResponse.ok) {
@@ -45,7 +57,7 @@ export function MonitoringPanel() {
       setWorkspaceItems([]);
       setOpenclawSnapshot(null);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     void loadMonitoring();

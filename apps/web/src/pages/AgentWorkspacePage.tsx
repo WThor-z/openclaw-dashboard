@@ -46,7 +46,7 @@ export function AgentWorkspacePage() {
           </h1>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto p-8" data-testid="agent-list-placeholder">
           <div className="max-w-6xl mx-auto">
             <AgentList onAgentClick={handleAgentClick} />
           </div>
@@ -101,11 +101,11 @@ export function AgentWorkspacePage() {
                 <section>
                   <h3 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Status</h3>
                   <div className="flex items-center gap-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg p-4">
-                    <div className={`w-3 h-3 rounded-full ${
-                      selectedAgent.status === "idle" ? "bg-slate-400" :
-                      selectedAgent.status === "busy" ? "bg-green-500 animate-pulse" :
-                      selectedAgent.status === "offline" ? "bg-slate-600" :
-                      "bg-red-500"
+                    <span className={`status-indicator ${
+                      selectedAgent.status === "idle" ? "status-idle" :
+                      selectedAgent.status === "busy" ? "status-busy" :
+                      selectedAgent.status === "offline" ? "status-offline" :
+                      "status-error"
                     }`} />
                     <span className="text-sm text-zinc-300 capitalize">{selectedAgent.status}</span>
                   </div>

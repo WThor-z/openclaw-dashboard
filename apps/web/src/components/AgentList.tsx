@@ -32,7 +32,7 @@ export function AgentList({ onAgentClick }: AgentListProps) {
 
   if (loading) {
     return (
-      <div data-testid="agent-list-placeholder" className="flex items-center justify-center p-12">
+      <div className="flex items-center justify-center p-12">
         <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
@@ -41,7 +41,7 @@ export function AgentList({ onAgentClick }: AgentListProps) {
   // Even if there's an error or no agents, we must ensure agent-list-placeholder exists for login.test.tsx
   if (error || agents.length === 0) {
     return (
-      <div data-testid="agent-list-placeholder" className="max-w-4xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <div className="border border-dashed border-zinc-700 rounded-xl p-12 flex flex-col items-center justify-center text-center space-y-4 bg-zinc-900/20">
           <div className="w-12 h-12 rounded-full border border-zinc-700 flex items-center justify-center text-zinc-500">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
@@ -63,7 +63,7 @@ export function AgentList({ onAgentClick }: AgentListProps) {
   }
 
   return (
-    <div data-testid="agent-list-placeholder" className="content-grid-3">
+    <div className="content-grid-3">
       {agents.map((agent) => (
         <AgentCard key={agent.id} agent={agent} onClick={onAgentClick} />
       ))}

@@ -38,6 +38,7 @@ const TASK14_ERROR_SCREENSHOT_PATH = path.join(
   "evidence",
   "task-14-automation-monitoring-error.png"
 );
+const SIM_MODE = process.env.SIM_MODE ?? "";
 
 test("connects with daemon token and shows dashboard navigation", async ({ page }) => {
   await page.goto("/login");
@@ -61,6 +62,7 @@ test("shows required token validation on empty submit", async ({ page }) => {
 });
 
 test("streams events and resolves approval with confirmation", async ({ page }) => {
+  const forceApprovalFailure = SIM_MODE === "approval-fail";
   await page.route("**/api/status", async (route) => {
     await route.fulfill({
       status: 200,
@@ -100,9 +102,13 @@ test("streams events and resolves approval with confirmation", async ({ page }) 
   });
   await page.route("**/api/control/approvals/**/resolve", async (route) => {
     await route.fulfill({
-      status: 200,
+      status: forceApprovalFailure ? 500 : 200,
       contentType: "application/json",
-      body: JSON.stringify({ ok: true, resolved: true })
+      body: JSON.stringify(
+        forceApprovalFailure
+          ? { code: "APPROVAL_FAILED" }
+          : { ok: true, resolved: true }
+      )
     });
   });
 

@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import tsParser from "@typescript-eslint/parser";
 import globals from "globals";
 
 export default [
@@ -12,7 +13,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["**/*.{js,mjs,cjs,ts,tsx}"],
+    files: ["**/*.{js,mjs,cjs}"],
     languageOptions: {
       globals: {
         ...globals.node
@@ -20,6 +21,28 @@ export default [
     },
     rules: {
       "no-console": "off"
+    }
+  },
+  {
+    files: ["**/*.{ts,tsx}"],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+        ecmaFeatures: {
+          jsx: true
+        }
+      },
+      globals: {
+        ...globals.node,
+        ...globals.browser
+      }
+    },
+    rules: {
+      "no-console": "off",
+      "no-undef": "off",
+      "no-unused-vars": "off"
     }
   },
   {

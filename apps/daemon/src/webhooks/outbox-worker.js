@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { normalizeAndValidateWebhookEndpoint } from "./endpoint-policy.js";
 
 const RETRYABLE_STATUS_CODES = new Set([408, 409, 425, 429]);
 
@@ -71,6 +72,7 @@ export function createWebhookOutboxWorker({
   maxAttempts = 5,
   breakerFailureThreshold = 3,
   breakerCooldownMs = 30000,
+  endpointPolicy = {},
   logger = console
 } = {}) {
   if (!repositories?.webhookDeliveries || !repositories?.webhooks) {
@@ -126,6 +128,29 @@ export function createWebhookOutboxWorker({
       return;
     }
 
+    let endpointUrl;
+    try {
+      endpointUrl = await normalizeAndValidateWebhookEndpoint(entry.endpointUrl, endpointPolicy);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "endpointUrl is not allowed";
+      repositories.webhookDeliveries.markFailed({
+        id: deliveryId,
+        attemptCount,
+        responseCode: null,
+        attemptedAt: nowIso,
+        lastError: errorMessage,
+        updatedAt: nowIso
+      });
+      repositories.webhooks.updateBreaker({
+        id: webhookId,
+        breakerState: "open",
+        consecutiveFailures: Math.max(entry.consecutiveFailures + 1, breakerFailureThreshold),
+        breakerNextAttemptAt: toIso(new Date(nowDate.getTime() + breakerCooldownMs)),
+        updatedAt: nowIso
+      });
+      return;
+    }
+
     if (entry.breakerState === "open") {
       repositories.webhooks.updateBreaker({
         id: webhookId,
@@ -169,8 +194,9 @@ export function createWebhookOutboxWorker({
     let requestError = null;
 
     try {
-      const response = await fetchImpl(entry.endpointUrl, {
+      const response = await fetchImpl(endpointUrl, {
         method: "POST",
+        redirect: "manual",
         headers: {
           "content-type": "application/json; charset=utf-8",
           "x-openclaw-signature": `sha256=${signature}`,

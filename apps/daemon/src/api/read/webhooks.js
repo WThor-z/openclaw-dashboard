@@ -9,6 +9,18 @@ function parseWorkspaceId(searchParams) {
   return "global";
 }
 
+function toSafeWebhookSummaryItem(item) {
+  if (!item || typeof item !== "object") {
+    return item;
+  }
+
+  const { secretRef, ...rest } = item;
+  return {
+    ...rest,
+    hasSecretRef: typeof secretRef === "string" && secretRef.trim().length > 0
+  };
+}
+
 export function handleWebhooksSummaryRead(res, searchParams, repositories) {
   const workspaceId = parseWorkspaceId(searchParams);
   const items = repositories?.webhooks?.listWithDeliverySummaryByWorkspace
@@ -16,7 +28,7 @@ export function handleWebhooksSummaryRead(res, searchParams, repositories) {
     : [];
   sendJson(res, 200, {
     workspaceId,
-    items
+    items: items.map((item) => toSafeWebhookSummaryItem(item))
   });
 }
 
@@ -32,7 +44,7 @@ export function handleWebhookDeliveriesRead(res, repositories, webhookId) {
     ? repositories.webhookDeliveries.listByWebhook(webhookId)
     : [];
   sendJson(res, 200, {
-    webhook,
+    webhook: toSafeWebhookSummaryItem(webhook),
     items
   });
 }

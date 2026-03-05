@@ -7,6 +7,7 @@ import { createStorageRepositories } from "../../../src/storage/repositories.js"
 
 const activeServers = [];
 const openDatabases = [];
+const READ_TOKEN = "dev-token";
 
 afterEach(async () => {
   while (activeServers.length > 0) {
@@ -36,12 +37,21 @@ async function startServer({ repositories } = {}) {
   const server = createDaemonServer({
     host: "127.0.0.1",
     port: 0,
+    adminToken: READ_TOKEN,
     logger: { info() {}, error() {} },
     repositories
   });
   await server.start();
   activeServers.push(server);
   return server;
+}
+
+function authorizedGet(url) {
+  return fetch(url, {
+    headers: {
+      authorization: `Bearer ${READ_TOKEN}`
+    }
+  });
 }
 
 function seedFixtureData(repositories) {
@@ -87,7 +97,12 @@ function seedFixtureData(repositories) {
     workspaceId: "ws-1",
     level: "info",
     kind: "task.updated",
-    payloadJson: JSON.stringify({ message: "ok", accessToken: "do-not-leak" }),
+    payloadJson: JSON.stringify({
+      message: "ok",
+      accessToken: "do-not-leak",
+      apiKey: "api-key-secret",
+      password: "plain-password"
+    }),
     createdAt: "2026-03-04T10:02:00.000Z"
   });
 }
@@ -99,38 +114,40 @@ describe("read APIs", () => {
     const server = await startServer({ repositories });
     const baseUrl = endpointFrom(server.address());
 
-    const statusResponse = await fetch(`${baseUrl}/api/status`);
+    const statusResponse = await authorizedGet(`${baseUrl}/api/status`);
     const statusBody = await statusResponse.json();
     expect(statusResponse.status).toBe(200);
     expect(statusBody).toMatchObject({ ok: true });
 
-    const eventsResponse = await fetch(`${baseUrl}/api/events?limit=10`);
+    const eventsResponse = await authorizedGet(`${baseUrl}/api/events?limit=10`);
     const eventsBody = await eventsResponse.json();
     expect(eventsResponse.status).toBe(200);
     expect(eventsBody.items).toHaveLength(1);
     expect(eventsBody.items[0].payload.accessToken).toBe("[REDACTED]");
+    expect(eventsBody.items[0].payload.apiKey).toBe("[REDACTED]");
+    expect(eventsBody.items[0].payload.password).toBe("[REDACTED]");
 
-    const sessionsResponse = await fetch(`${baseUrl}/api/sessions`);
+    const sessionsResponse = await authorizedGet(`${baseUrl}/api/sessions`);
     const sessionsBody = await sessionsResponse.json();
     expect(sessionsResponse.status).toBe(200);
     expect(sessionsBody.items).toHaveLength(1);
 
-    const sessionResponse = await fetch(`${baseUrl}/api/sessions/session-1`);
+    const sessionResponse = await authorizedGet(`${baseUrl}/api/sessions/session-1`);
     const sessionBody = await sessionResponse.json();
     expect(sessionResponse.status).toBe(200);
     expect(sessionBody.session.id).toBe("session-1");
 
-    const tasksResponse = await fetch(`${baseUrl}/api/tasks`);
+    const tasksResponse = await authorizedGet(`${baseUrl}/api/tasks`);
     const tasksBody = await tasksResponse.json();
     expect(tasksResponse.status).toBe(200);
     expect(tasksBody.items).toHaveLength(1);
 
-    const taskResponse = await fetch(`${baseUrl}/api/tasks/task-1`);
+    const taskResponse = await authorizedGet(`${baseUrl}/api/tasks/task-1`);
     const taskBody = await taskResponse.json();
     expect(taskResponse.status).toBe(200);
     expect(taskBody.task.id).toBe("task-1");
 
-    const costsResponse = await fetch(`${baseUrl}/api/costs/daily`);
+    const costsResponse = await authorizedGet(`${baseUrl}/api/costs/daily`);
     const costsBody = await costsResponse.json();
     expect(costsResponse.status).toBe(200);
     expect(costsBody.days).toEqual([
@@ -141,12 +158,12 @@ describe("read APIs", () => {
       }
     ]);
 
-    const workspacesResponse = await fetch(`${baseUrl}/api/monitors/workspaces`);
+    const workspacesResponse = await authorizedGet(`${baseUrl}/api/monitors/workspaces`);
     const workspacesBody = await workspacesResponse.json();
     expect(workspacesResponse.status).toBe(200);
     expect(Array.isArray(workspacesBody.items)).toBe(true);
 
-    const openclawResponse = await fetch(`${baseUrl}/api/monitors/openclaw`);
+    const openclawResponse = await authorizedGet(`${baseUrl}/api/monitors/openclaw`);
     const openclawBody = await openclawResponse.json();
     expect(openclawResponse.status).toBe(200);
     expect(openclawBody.snapshot).toMatchObject({ status: "not_configured" });
@@ -157,7 +174,7 @@ describe("read APIs", () => {
     const server = await startServer({ repositories });
     const baseUrl = endpointFrom(server.address());
 
-    const response = await fetch(`${baseUrl}/api/events?limit=50000`);
+    const response = await authorizedGet(`${baseUrl}/api/events?limit=50000`);
     const body = await response.json();
 
     expect(response.status).toBe(400);
@@ -204,7 +221,7 @@ describe("read APIs", () => {
       createdAt: "2026-03-04T10:03:00.000Z"
     });
 
-    const firstPageResponse = await fetch(`${baseUrl}/api/events?limit=2`);
+    const firstPageResponse = await authorizedGet(`${baseUrl}/api/events?limit=2`);
     const firstPageBody = await firstPageResponse.json();
     expect(firstPageResponse.status).toBe(200);
     expect(firstPageBody.items.map((item) => item.id)).toEqual(["event-3", "event-2"]);
@@ -222,7 +239,7 @@ describe("read APIs", () => {
       createdAt: "2026-03-04T10:04:00.000Z"
     });
 
-    const secondPageResponse = await fetch(
+    const secondPageResponse = await authorizedGet(
       `${baseUrl}/api/events?limit=2&cursor=${encodeURIComponent(firstPageBody.nextCursor)}`
     );
     const secondPageBody = await secondPageResponse.json();

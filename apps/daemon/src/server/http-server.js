@@ -2,12 +2,16 @@ import { createServer } from "node:http";
 
 import { createControlApiRouter } from "../api/control/index.js";
 import { createReadApiRouter } from "../api/read/index.js";
-import { assertAuthorizedControlRequest } from "../middleware/auth-gate.js";
+import {
+  assertAuthorizedControlRequest,
+  assertAuthorizedReadRequest
+} from "../middleware/auth-gate.js";
 import { HttpError, sendError, sendJson } from "../middleware/error-handler.js";
 import { createMonitorProvidersFromEnv } from "../monitoring/collectors.js";
 import { attachRequestId } from "../middleware/request-id.js";
 import { resolveBindConfig } from "./config.js";
 import { createWebhookOutboxWorker } from "../webhooks/outbox-worker.js";
+import { resolveWebhookEndpointPolicy } from "../webhooks/endpoint-policy.js";
 
 function parseRequestUrl(req) {
   return new URL(req.url ?? "/", "http://localhost");
@@ -17,6 +21,10 @@ function isControlRoute(pathname) {
   return pathname.startsWith("/api/control/");
 }
 
+function isReadApiRoute(pathname) {
+  return pathname.startsWith("/api/") && !isControlRoute(pathname);
+}
+
 function requestHandlerFactory({
   adminToken,
   logger,
@@ -24,7 +32,9 @@ function requestHandlerFactory({
   statusProvider,
   monitorProviders,
   readOnlyMode,
-  writeArmWindowMs
+  writeArmWindowMs,
+  readAuthEnabled,
+  webhookEndpointPolicy
 }) {
   const readRouter = createReadApiRouter({
     repositories,
@@ -34,7 +44,8 @@ function requestHandlerFactory({
   const controlRouter = createControlApiRouter({
     repositories,
     readOnlyMode,
-    writeArmWindowMs
+    writeArmWindowMs,
+    webhookEndpointPolicy
   });
 
   return async function handleRequest(req, res) {
@@ -50,13 +61,28 @@ function requestHandlerFactory({
     });
 
     try {
+      if (req.method === "GET" && pathname === "/health") {
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/auth/check") {
+        if (!readAuthEnabled) {
+          sendJson(res, 200, { ok: true, authorized: true, authRequired: false });
+          return;
+        }
+
+        assertAuthorizedReadRequest(req, adminToken);
+        sendJson(res, 200, { ok: true, authorized: true, authRequired: true });
+        return;
+      }
+
       if (isControlRoute(pathname)) {
         assertAuthorizedControlRequest(req, adminToken);
       }
 
-      if (req.method === "GET" && pathname === "/health") {
-        sendJson(res, 200, { ok: true });
-        return;
+      if (readAuthEnabled && isReadApiRoute(pathname)) {
+        assertAuthorizedReadRequest(req, adminToken);
       }
 
       if (await readRouter.handle(req, res, requestUrl)) {
@@ -78,12 +104,14 @@ export function createDaemonServer({
   host,
   port,
   adminToken = process.env.DASHBOARD_ADMIN_TOKEN,
+  readAuthEnabled = process.env.DAEMON_READ_AUTH_ENABLED !== "0",
   readOnlyMode = process.env.DAEMON_READ_ONLY_SAFETY_MODE === "1",
   writeArmWindowMs = Number.parseInt(process.env.DAEMON_CONTROL_ARM_WINDOW_MS ?? "", 10),
   logger = console,
   repositories,
   statusProvider,
   monitorProviders = createMonitorProvidersFromEnv(),
+  webhookEndpointPolicy = resolveWebhookEndpointPolicy(),
   webhookWorker,
   webhookWorkerOptions = {}
 } = {}) {
@@ -94,10 +122,12 @@ export function createDaemonServer({
       logger,
       repositories,
       statusProvider,
-      monitorProviders,
-      readOnlyMode,
-      writeArmWindowMs
-    })
+        monitorProviders,
+        readOnlyMode,
+        writeArmWindowMs,
+        readAuthEnabled,
+        webhookEndpointPolicy
+      })
   );
 
   const worker =
@@ -113,6 +143,7 @@ export function createDaemonServer({
           return process.env[secretRef] ?? null;
         },
         logger,
+        endpointPolicy: webhookEndpointPolicy,
         ...webhookWorkerOptions
       })
       : null);

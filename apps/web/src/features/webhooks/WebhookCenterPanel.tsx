@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 type WebhookSummaryItem = {
   id: string;
   endpointUrl: string;
-  secretRef: string | null;
+  hasSecretRef: boolean;
   enabled: number | boolean;
   lastStatus?: string | null;
 };
@@ -64,7 +64,11 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
 
   const loadWebhooks = useCallback(async () => {
     try {
-      const response = await fetch("/api/webhooks?workspaceId=global");
+      const response = await fetch("/api/webhooks?workspaceId=global", {
+        headers: {
+          authorization: `Bearer ${token ?? ""}`
+        }
+      });
       if (!response.ok) {
         throw new Error("Failed webhook list");
       }
@@ -74,11 +78,15 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
     } catch {
       setStatusMessage("Failed to load webhooks");
     }
-  }, []);
+  }, [token]);
 
   const loadDeliveries = useCallback(async (webhookId: string) => {
     try {
-      const response = await fetch(`/api/webhooks/${encodeURIComponent(webhookId)}/deliveries`);
+      const response = await fetch(`/api/webhooks/${encodeURIComponent(webhookId)}/deliveries`, {
+        headers: {
+          authorization: `Bearer ${token ?? ""}`
+        }
+      });
       if (!response.ok) {
         throw new Error("Failed webhook deliveries");
       }
@@ -90,7 +98,7 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
     } catch {
       setStatusMessage("Failed to load delivery history");
     }
-  }, []);
+  }, [token]);
 
   const armWrites = useCallback(async () => {
     const response = await fetch("/api/control/arm", {
@@ -134,7 +142,7 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
   async function onSaveWebhook() {
     const endpointUrl = endpointUrlInput.trim();
     const secretRef = secretRefInput.trim();
-    if (!endpointUrl || !secretRef) {
+    if (!endpointUrl || (!editingWebhookId && !secretRef)) {
       setStatusMessage("Webhook URL and token alias are required");
       return;
     }
@@ -142,13 +150,21 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
     setIsSaving(true);
     try {
       if (editingWebhookId) {
+        const updatePayload: {
+          endpointUrl: string;
+          enabled: boolean;
+          secretRef?: string;
+        } = {
+          endpointUrl,
+          enabled: true
+        };
+        if (secretRef) {
+          updatePayload.secretRef = secretRef;
+        }
+
         await mutateWebhookControl(
           `/api/control/webhooks/${encodeURIComponent(editingWebhookId)}/update`,
-          {
-            endpointUrl,
-            secretRef,
-            enabled: true
-          },
+          updatePayload,
           "webhook-update"
         );
         setStatusMessage("Webhook updated");
@@ -278,7 +294,7 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
           <li data-testid="webhook-card" key={item.id}>
             <strong>{item.endpointUrl}</strong> ({toBooleanEnabled(item.enabled) ? "enabled" : "disabled"})
             <div>
-              Secret alias: <span data-testid="redaction-indicator">[REDACTED]</span> ({item.secretRef ?? "unset"})
+              Secret alias: <span data-testid="redaction-indicator">[REDACTED]</span> ({item.hasSecretRef ? "configured" : "unset"})
             </div>
             <div>Latest status: {toDisplayStatus(item.lastStatus)}</div>
             <button
@@ -286,7 +302,7 @@ export function WebhookCenterPanel({ token }: WebhookCenterPanelProps) {
                 setFormOpen(true);
                 setEditingWebhookId(item.id);
                 setEndpointUrlInput(item.endpointUrl);
-                setSecretRefInput(item.secretRef ?? "");
+                setSecretRefInput("");
               }}
               type="button"
             >

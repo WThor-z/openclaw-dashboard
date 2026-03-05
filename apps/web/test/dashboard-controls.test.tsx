@@ -21,6 +21,10 @@ function installFetchMock({ resolveStatus = 200 }: { resolveStatus?: number } = 
     .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
+      if (requestUrl.startsWith("/api/auth/check")) {
+        return createJsonResponse(200, { ok: true, authorized: true });
+      }
+
       if (requestUrl.startsWith("/api/status")) {
         return createJsonResponse(200, { ok: true, status: "connected" });
       }

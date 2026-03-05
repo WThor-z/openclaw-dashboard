@@ -107,6 +107,10 @@ describe("webhook outbox worker", () => {
       random() {
         return 0;
       },
+      endpointPolicy: {
+        allowHttp: true,
+        allowPrivateAddresses: true
+      },
       timeoutMs: 2000,
       logger: { info() {}, error() {} }
     });
@@ -161,6 +165,10 @@ describe("webhook outbox worker", () => {
       },
       random() {
         return 0;
+      },
+      endpointPolicy: {
+        allowHttp: true,
+        allowPrivateAddresses: true
       },
       retryBaseDelayMs: 1000,
       retryMaxDelayMs: 8000,
@@ -242,6 +250,10 @@ describe("webhook outbox worker", () => {
       random() {
         return 0;
       },
+      endpointPolicy: {
+        allowHttp: true,
+        allowPrivateAddresses: true
+      },
       claimTimeoutMs: 1000,
       timeoutMs: 2000,
       logger: { info() {}, error() {} }
@@ -255,6 +267,127 @@ describe("webhook outbox worker", () => {
       status: "delivered",
       attemptCount: 1,
       responseCode: 200
+    });
+  });
+
+  it("fails fast for blocked endpoint addresses", async () => {
+    const repositories = createFixtureRepositories();
+    const nowIso = "2026-03-05T04:00:00.000Z";
+
+    repositories.webhooks.insert({
+      id: "wh-4",
+      workspaceId: "ws-1",
+      endpointUrl: "https://169.254.169.254/latest/meta-data",
+      secretRef: "WH_SECRET",
+      enabled: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+    repositories.webhookDeliveries.enqueue({
+      id: "delivery-4",
+      webhookId: "wh-4",
+      payloadJson: JSON.stringify({ event: "blocked" }),
+      status: "pending",
+      maxAttempts: 3,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+
+    const worker = createWebhookOutboxWorker({
+      repositories,
+      resolveSecretRef() {
+        return "super-secret";
+      },
+      now() {
+        return new Date(nowIso);
+      },
+      random() {
+        return 0;
+      },
+      timeoutMs: 2000,
+      logger: { info() {}, error() {} }
+    });
+
+    await worker.runOnce();
+
+    const history = repositories.webhookDeliveries.listByWebhook("wh-4");
+    expect(history[0]).toMatchObject({
+      status: "failed",
+      attemptCount: 1,
+      responseCode: null
+    });
+    expect(history[0].lastError).toContain("not allowed");
+  });
+
+  it("does not follow webhook redirects", async () => {
+    const repositories = createFixtureRepositories();
+    const nowIso = "2026-03-05T05:00:00.000Z";
+    const seenRequests = [];
+    const redirectServer = createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+      }
+      seenRequests.push(Buffer.concat(chunks).toString("utf8"));
+
+      res.statusCode = 302;
+      res.setHeader("location", "https://169.254.169.254/latest/meta-data");
+      res.end("redirect");
+    });
+
+    await new Promise((resolve) => {
+      redirectServer.listen(0, "127.0.0.1", resolve);
+    });
+    activeServers.push(redirectServer);
+
+    const redirectAddress = redirectServer.address();
+    const endpointUrl = `http://${redirectAddress.address}:${redirectAddress.port}/redirect`;
+
+    repositories.webhooks.insert({
+      id: "wh-5",
+      workspaceId: "ws-1",
+      endpointUrl,
+      secretRef: "WH_SECRET",
+      enabled: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+    repositories.webhookDeliveries.enqueue({
+      id: "delivery-5",
+      webhookId: "wh-5",
+      payloadJson: JSON.stringify({ event: "redirect" }),
+      status: "pending",
+      maxAttempts: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    });
+
+    const worker = createWebhookOutboxWorker({
+      repositories,
+      resolveSecretRef() {
+        return "super-secret";
+      },
+      now() {
+        return new Date(nowIso);
+      },
+      random() {
+        return 0;
+      },
+      endpointPolicy: {
+        allowHttp: true,
+        allowPrivateAddresses: true
+      },
+      timeoutMs: 2000,
+      logger: { info() {}, error() {} }
+    });
+
+    await worker.runOnce();
+
+    expect(seenRequests).toHaveLength(1);
+    const history = repositories.webhookDeliveries.listByWebhook("wh-5");
+    expect(history[0]).toMatchObject({
+      status: "failed",
+      responseCode: 302
     });
   });
 });

@@ -12,6 +12,7 @@ import { createStorageRepositories } from "../../../src/storage/repositories.js"
 const activeServers = [];
 const openDatabases = [];
 const temporaryDirectories = [];
+const READ_TOKEN = "dev-token";
 
 afterEach(async () => {
   while (activeServers.length > 0) {
@@ -46,6 +47,7 @@ async function startServer({ repositories, monitorProviders }) {
   const server = createDaemonServer({
     host: "127.0.0.1",
     port: 0,
+    adminToken: READ_TOKEN,
     logger: { info() {}, error() {} },
     repositories,
     monitorProviders
@@ -53,6 +55,14 @@ async function startServer({ repositories, monitorProviders }) {
   await server.start();
   activeServers.push(server);
   return server;
+}
+
+function authorizedGet(url) {
+  return fetch(url, {
+    headers: {
+      authorization: `Bearer ${READ_TOKEN}`
+    }
+  });
 }
 
 async function createFixtureTree() {
@@ -92,7 +102,7 @@ describe("monitor read APIs", () => {
     const server = await startServer({ repositories, monitorProviders });
     const baseUrl = endpointFrom(server.address());
 
-    const workspacesResponse = await fetch(`${baseUrl}/api/monitors/workspaces`);
+    const workspacesResponse = await authorizedGet(`${baseUrl}/api/monitors/workspaces`);
     const workspacesBody = await workspacesResponse.json();
 
     expect(workspacesResponse.status).toBe(200);
@@ -104,7 +114,7 @@ describe("monitor read APIs", () => {
     });
     expect(workspacesBody.items[0]).not.toHaveProperty("content");
 
-    const openclawResponse = await fetch(`${baseUrl}/api/monitors/openclaw`);
+    const openclawResponse = await authorizedGet(`${baseUrl}/api/monitors/openclaw`);
     const openclawBody = await openclawResponse.json();
 
     expect(openclawResponse.status).toBe(200);
@@ -126,7 +136,7 @@ describe("monitor read APIs", () => {
     const server = await startServer({ repositories, monitorProviders });
     const baseUrl = endpointFrom(server.address());
 
-    const response = await fetch(`${baseUrl}/api/monitors/workspaces?path=../../Users`);
+    const response = await authorizedGet(`${baseUrl}/api/monitors/workspaces?path=../../Users`);
     const body = await response.json();
 
     expect(response.status).toBe(400);

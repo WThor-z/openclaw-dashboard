@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { HttpError, sendJson } from "../../middleware/error-handler.js";
 import { redactSecrets } from "../read/redaction.js";
+import {
+  normalizeAndValidateWebhookEndpoint,
+  WebhookEndpointPolicyError
+} from "../../webhooks/endpoint-policy.js";
 
 const DEFAULT_ARM_WINDOW_MS = 30000;
 const MAX_BODY_SIZE_BYTES = 1024 * 1024;
@@ -187,7 +191,8 @@ function persistAuditEvent({ repositories, dedupeKey, workspaceId, taskId, kind,
 export function createControlApiRouter({
   repositories,
   readOnlyMode = false,
-  writeArmWindowMs = DEFAULT_ARM_WINDOW_MS
+  writeArmWindowMs = DEFAULT_ARM_WINDOW_MS,
+  webhookEndpointPolicy = {}
 } = {}) {
   const mutationLocks = new Map();
   const armingState = {
@@ -339,6 +344,18 @@ export function createControlApiRouter({
     throw new HttpError(404, "NOT_FOUND", "Route not found");
   }
 
+  async function normalizeEndpointOrThrow(endpointUrl) {
+    try {
+      return await normalizeAndValidateWebhookEndpoint(endpointUrl, webhookEndpointPolicy);
+    } catch (error) {
+      if (error instanceof WebhookEndpointPolicyError) {
+        throw new HttpError(400, error.code, error.message);
+      }
+
+      throw error;
+    }
+  }
+
   return {
     async handle(req, res, requestUrl) {
       if (req.method !== "POST") {
@@ -472,6 +489,8 @@ export function createControlApiRouter({
               throw new HttpError(400, "SECRET_REF_REQUIRED", "secretRef is required");
             }
 
+            const endpointUrl = await normalizeEndpointOrThrow(body.endpointUrl.trim());
+
             const webhookId =
               typeof body.webhookId === "string" && body.webhookId.trim().length > 0
                 ? body.webhookId.trim()
@@ -482,7 +501,7 @@ export function createControlApiRouter({
               repositories.webhooks.insert({
                 id: webhookId,
                 workspaceId,
-                endpointUrl: body.endpointUrl.trim(),
+                endpointUrl,
                 secretRef: body.secretRef.trim(),
                 enabled,
                 createdAt: now,
@@ -521,6 +540,7 @@ export function createControlApiRouter({
                 typeof body.endpointUrl === "string" && body.endpointUrl.trim().length > 0
                   ? body.endpointUrl.trim()
                   : webhook.endpointUrl;
+              const normalizedEndpointUrl = await normalizeEndpointOrThrow(endpointUrl);
               const secretRef =
                 typeof body.secretRef === "string" && body.secretRef.trim().length > 0
                   ? body.secretRef.trim()
@@ -530,7 +550,7 @@ export function createControlApiRouter({
               const updated = repositories?.webhooks?.update
                 ? repositories.webhooks.update({
                   id: webhookRoute.webhookId,
-                  endpointUrl,
+                  endpointUrl: normalizedEndpointUrl,
                   secretRef,
                   enabled,
                   updatedAt: now

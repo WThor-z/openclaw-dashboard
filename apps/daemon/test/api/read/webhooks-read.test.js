@@ -37,7 +37,11 @@ async function startServer({ repositories } = {}) {
     host: "127.0.0.1",
     port: 0,
     logger: { info() {}, error() {} },
-    repositories
+    repositories,
+    webhookWorker: {
+      start: async () => {},
+      stop: async () => {}
+    }
   });
   await server.start();
   activeServers.push(server);

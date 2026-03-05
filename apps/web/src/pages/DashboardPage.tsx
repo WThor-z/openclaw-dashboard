@@ -14,6 +14,8 @@ import {
   type SessionTimelineItem
 } from "../features/sessions/SessionExplorerPanel.js";
 import { TasksPanel, type TaskItem } from "../features/tasks/TasksPanel.js";
+import { MonitoringPanel } from "../features/monitoring/MonitoringPanel.js";
+import { WebhookCenterPanel } from "../features/webhooks/WebhookCenterPanel.js";
 
 const MODULE_NAV = [
   { id: "events", label: "Events" },
@@ -486,6 +488,10 @@ export function DashboardPage() {
           void openSessionDrilldown(sessionId);
         }}
       />
+
+      <WebhookCenterPanel token={token} />
+
+      <MonitoringPanel />
 
       {statusMessage ? <p role="status">{statusMessage}</p> : null}
     </main>

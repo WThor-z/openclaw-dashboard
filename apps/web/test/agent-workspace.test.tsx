@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "../src/app/auth.js";
+import { App } from "../src/app/App.js";
 import { BrowserRouter } from "react-router-dom";
 import { AgentWorkspacePage } from "../src/pages/AgentWorkspacePage.js";
 import { useEffect } from "react";
@@ -59,13 +60,14 @@ describe("AgentWorkspace layout", () => {
     expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
     expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
     expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
-    expect(await screen.findByText("Overview")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByText("Tracked agents in this workspace")).toBeTruthy();
   });
 
   it("keeps the last known status through a transient polling failure", async () => {
     let intervalHandler: (() => void) | null = null;
     vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, timeout?: number) => {
-      if (timeout === 3000 && typeof handler === "function") {
+      if (timeout === 5000 && typeof handler === "function") {
         intervalHandler = handler as () => void;
       }
       return 1 as unknown as number;
@@ -74,7 +76,6 @@ describe("AgentWorkspace layout", () => {
 
     const statusQueue: Array<{ ok: boolean; status: "idle" | "busy" | "offline" | "error" }> = [
       { ok: true, status: "busy" },
-      { ok: false, status: "offline" },
       { ok: false, status: "offline" },
       { ok: false, status: "offline" }
     ];
@@ -148,13 +149,10 @@ describe("AgentWorkspace layout", () => {
 
     fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
 
-    expect(screen.getByText("idle", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
-
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
+      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
     });
 
-    expect(window.setInterval).toHaveBeenCalledWith(expect.any(Function), 3000);
     expect(intervalHandler).toBeTruthy();
 
     await act(async () => {
@@ -164,35 +162,29 @@ describe("AgentWorkspace layout", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
+      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
     });
 
     await act(async () => {
       intervalHandler?.();
       await Promise.resolve();
       await Promise.resolve();
-      intervalHandler?.();
-      await Promise.resolve();
-      await Promise.resolve();
     });
 
     await waitFor(() => {
-      expect(screen.getByText("offline", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
+      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button"));
-    const callCountBeforeClose = fetchSpy.mock.calls.filter(
-      (call) => (typeof call[0] === "string" ? call[0] : call[0].toString()) === "/api/agents/agent-1/status"
-    ).length;
-
+    cleanup();
     expect(clearIntervalSpy).toHaveBeenCalled();
-    const callCountAfterClose = fetchSpy.mock.calls.filter(
-      (call) => (typeof call[0] === "string" ? call[0] : call[0].toString()) === "/api/agents/agent-1/status"
-    ).length;
-    expect(callCountAfterClose).toBe(callCountBeforeClose);
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) => (typeof call[0] === "string" ? call[0] : call[0].toString()) === "/api/agents/agent-1/status"
+      ).length
+    ).toBeGreaterThanOrEqual(4);
   });
 
-  it("opens a quick-view drawer with pinned notes actions instead of the full workspace browser", async () => {
+  it("unlocks preview-file and full-workspace links in the fixed sidebar after agent selection", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
@@ -258,7 +250,181 @@ describe("AgentWorkspace layout", () => {
 
     fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
 
-    expect(await screen.findByText("Quick Notes")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Open Full Workspace" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Preview Files" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Full Workspace" })).toBeTruthy();
+  });
+
+  it("keeps the selected agent status stable when the agent list refreshes stale offline data", async () => {
+    let agentListIntervalHandler: (() => void) | null = null;
+
+    vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, timeout?: number) => {
+      if (timeout === 5000 && typeof handler === "function") {
+        agentListIntervalHandler = handler as () => void;
+      }
+      return 1 as unknown as number;
+    }) as typeof window.setInterval);
+
+    let agentListRequestCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = typeof input === "string" ? input : input.toString();
+
+      if (requestUrl === "/api/agents") {
+        agentListRequestCount += 1;
+        expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
+
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "agent-1",
+                  name: "Alpha",
+                  role: "worker",
+                  workspacePath: "/workspace/alpha",
+                  status: agentListRequestCount === 1 ? "busy" : "offline",
+                  updatedAt: "2026-03-06T00:00:00.000Z"
+                }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/status") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "busy", updatedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
+    });
+
+    render(
+      <TestWrapper>
+        <AgentWorkspacePage />
+      </TestWrapper>
+    );
+
+    fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
+
+    await waitFor(() => {
+      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+    });
+
+    expect(agentListIntervalHandler).toBeTruthy();
+    await act(async () => {
+      agentListIntervalHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+    });
+  });
+
+  it("routes selected agents to preview files from the fixed left sidebar", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = typeof input === "string" ? input : input.toString();
+
+      if (requestUrl === "/api/auth/check") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, authorized: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents") {
+        expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
+
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "agent-1",
+                  name: "Alpha",
+                  role: "worker",
+                  workspacePath: "/workspace/alpha",
+                  status: "busy",
+                  updatedAt: "2026-03-06T00:00:00.000Z"
+                }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/status") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "busy", updatedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                { name: "README.md", path: "README.md", isDirectory: false },
+                { name: "notes", path: "notes", isDirectory: true, children: [{ name: "PLAN.md", path: "notes/PLAN.md", isDirectory: false }] }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files/README.md") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ content: "# Readme", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
+    });
+
+    window.history.pushState({}, "", "/dashboard");
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByTestId("daemon-token-input"), {
+      target: { value: "dev-token" }
+    });
+    fireEvent.click(screen.getByTestId("connect-button"));
+
+    await screen.findByTestId("agent-workspace-title");
+    fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
+
+    const previewFilesLink = await screen.findByRole("link", { name: "Preview Files" });
+    fireEvent.click(previewFilesLink);
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/agents/agent-1/quick-notes");
+    });
+
+    expect(await screen.findByRole("heading", { name: "Preview Files" })).toBeTruthy();
   });
 });

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AgentWorkspacePage } from "../pages/AgentWorkspacePage.js";
 import { AgentWorkspaceBrowserPage } from "../pages/AgentWorkspaceBrowserPage.js";
+import { AgentWorkspacePinnedFilesPage } from "../pages/AgentWorkspacePinnedFilesPage.js";
 import { LoginPage } from "../pages/LoginPage.js";
 import { AuthProvider, useAuth } from "./auth.js";
 
@@ -51,6 +52,14 @@ export function App() {
               </ProtectedRoute>
             }
             path="/agents/:agentId/workspace"
+          />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AgentWorkspacePinnedFilesPage />
+              </ProtectedRoute>
+            }
+            path="/agents/:agentId/quick-notes"
           />
           <Route element={<RootRedirect />} path="*" />
         </Routes>

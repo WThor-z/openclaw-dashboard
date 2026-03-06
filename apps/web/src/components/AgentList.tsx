@@ -6,9 +6,10 @@ import { useAuth } from "../app/auth.js";
 
 interface AgentListProps {
   onAgentClick: (agent: Agent) => void;
+  onAgentsChange?: (agents: Agent[]) => void;
 }
 
-export function AgentList({ onAgentClick }: AgentListProps) {
+export function AgentList({ onAgentClick, onAgentsChange }: AgentListProps) {
   const { token } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +24,11 @@ export function AgentList({ onAgentClick }: AgentListProps) {
     }
 
     const fetchAgents = async () => {
-      setLoading(true);
+      const shouldShowInitialLoading = agents.length === 0;
+      if (shouldShowInitialLoading) {
+        setLoading(true);
+      }
+
       try {
         const response = await fetch("/api/agents", {
           headers: {
@@ -34,17 +39,29 @@ export function AgentList({ onAgentClick }: AgentListProps) {
           throw new Error("Failed to fetch agents");
         }
         const data = await response.json();
-        setAgents(data.items || []);
+        const nextAgents = data.items || [];
+        setAgents(nextAgents);
+        onAgentsChange?.(nextAgents);
+        setError(null);
       } catch (err) {
         console.error("Error fetching agents:", err);
         setError(err instanceof Error ? err.message : "Unknown error");
       } finally {
-        setLoading(false);
+        if (shouldShowInitialLoading) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchAgents();
-  }, [token]);
+    void fetchAgents();
+    const timer = window.setInterval(() => {
+      void fetchAgents();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [agents.length, onAgentsChange, token]);
 
   if (loading) {
     return (

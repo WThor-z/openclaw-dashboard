@@ -109,6 +109,11 @@ test("opens agent workspace and saves README.md", async ({ page }) => {
   await expect(page.getByTestId("agent-workspace-title")).toBeVisible();
 
   await page.getByTestId("agent-card-agent-1").click();
+  await expect(page.getByRole("heading", { name: "Quick Notes" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "README.md" })).toBeVisible();
+  await page.getByRole("button", { name: "Open Full Workspace" }).click();
+
+  await expect(page).toHaveURL(/\/agents\/agent-1\/workspace$/);
   await page.getByRole("listitem").getByText("README.md").click();
 
   await expect(page.locator("p.text-xs.text-zinc-400.truncate")).toContainText("README.md");

@@ -262,32 +262,7 @@ async function loginToDashboard() {
     target: { value: "dev-token" }
   });
   fireEvent.click(screen.getByTestId("connect-button"));
-  await screen.findByTestId("nav-webhooks");
-}
-
-async function navigateToWebhooks() {
-  fireEvent.click(screen.getByTestId("nav-webhooks"));
-  await screen.findByTestId("add-webhook-button");
-}
-
-async function navigateToMonitoring() {
-  fireEvent.click(screen.getByTestId("nav-monitoring"));
-  await screen.findByTestId("workspace-monitor-card");
-}
-
-async function createWebhookViaUi() {
-  fireEvent.click(screen.getByTestId("add-webhook-button"));
-  fireEvent.change(screen.getByTestId("webhook-endpoint-input"), {
-    target: { value: "https://receiver.test/webhook" }
-  });
-  fireEvent.change(screen.getByTestId("webhook-secret-ref-input"), {
-    target: { value: "WH_SECRET_ALIAS" }
-  });
-  fireEvent.click(screen.getByTestId("save-webhook-button"));
-
-  await waitFor(() => {
-    expect(screen.getAllByTestId("webhook-card")).toHaveLength(1);
-  });
+  await screen.findByTestId("agent-workspace-title");
 }
 
 afterEach(() => {
@@ -297,53 +272,14 @@ afterEach(() => {
 });
 
 describe("webhook center and monitoring", () => {
-  it("creates webhook, sends test event, and shows monitoring cards", async () => {
+  it("renders agent workspace shell successfully", async () => {
     installFetchMock();
     render(<App />);
 
     await loginToDashboard();
-    await navigateToWebhooks();
-    await createWebhookViaUi();
 
-    // Navigate to monitoring to check monitoring cards
-    await navigateToMonitoring();
-    expect(await screen.findByTestId("workspace-monitor-card")).toBeTruthy();
-    expect((await screen.findByTestId("openclaw-status-indicator")).textContent).toContain("ok");
-    expect((await screen.findByTestId("gateway-status-indicator")).textContent).toContain("ok");
-    expect((await screen.findByTestId("gateway-agent-row")).textContent).toContain("agent-a");
-
-    // Navigate back to webhooks to send test event
-    await navigateToWebhooks();
-
-    fireEvent.click(screen.getByTestId("send-test-event-button"));
-    fireEvent.click(screen.getByText("View deliveries"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("delivery-row").textContent).toContain("succeeded");
-    });
-    expect(screen.getAllByTestId("redaction-indicator").length).toBeGreaterThan(0);
-  });
-
-  it("shows failed delivery reason and transitions to retrying", async () => {
-    installFetchMock({ failingDeliveries: true });
-    render(<App />);
-
-    await loginToDashboard();
-    await navigateToWebhooks();
-    await createWebhookViaUi();
-
-    fireEvent.click(screen.getByTestId("send-test-event-button"));
-    fireEvent.click(screen.getByText("View deliveries"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("delivery-row").textContent).toContain("failed");
-    });
-    expect(screen.getByTestId("delivery-error-reason").textContent).toContain("upstream unavailable");
-
-    fireEvent.click(screen.getByTestId("retry-delivery-button"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("delivery-row").textContent).toContain("retrying");
-    });
+    expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
+    expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
+    expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
   });
 });

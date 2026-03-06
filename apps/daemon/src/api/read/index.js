@@ -2,6 +2,12 @@ import { HttpError } from "../../middleware/error-handler.js";
 import { handleDailyCostsRead } from "./costs.js";
 import { handleEventsRead } from "./events.js";
 import {
+  handleAgentFileRead,
+  handleAgentFilesListRead,
+  handleAgentStatusRead,
+  handleAgentsListRead
+} from "./agents.js";
+import {
   handleGatewayMonitorRead,
   handleOpenclawMonitorRead,
   handleWorkspaceMonitorsRead
@@ -17,6 +23,57 @@ function extractSuffix(pathname, prefix) {
   }
 
   return pathname.slice(prefix.length);
+}
+
+function decodePathOrThrow(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(400, "INVALID_FILE_PATH", "File path is invalid");
+  }
+}
+
+function resolveAgentFilesRoute(pathname) {
+  const prefix = "/api/agents/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+
+  const suffix = pathname.slice(prefix.length);
+  if (!suffix) {
+    throw new HttpError(404, "NOT_FOUND", "Route not found");
+  }
+
+  const firstSlash = suffix.indexOf("/");
+  if (firstSlash <= 0) {
+    return null;
+  }
+
+  const encodedAgentId = suffix.slice(0, firstSlash);
+  const remainder = suffix.slice(firstSlash + 1);
+  if (!remainder.startsWith("files")) {
+    return null;
+  }
+
+  const agentId = decodePathOrThrow(encodedAgentId);
+  if (!agentId) {
+    throw new HttpError(404, "NOT_FOUND", "Route not found");
+  }
+
+  if (remainder === "files") {
+    return { agentId, filePath: null };
+  }
+
+  if (!remainder.startsWith("files/")) {
+    throw new HttpError(404, "NOT_FOUND", "Route not found");
+  }
+
+  const encodedFilePath = remainder.slice("files/".length);
+  if (!encodedFilePath) {
+    throw new HttpError(404, "NOT_FOUND", "Route not found");
+  }
+
+  return { agentId, filePath: decodePathOrThrow(encodedFilePath) };
 }
 
 export function createReadApiRouter({ repositories, statusProvider, monitorProviders }) {
@@ -54,6 +111,37 @@ export function createReadApiRouter({ repositories, statusProvider, monitorProvi
 
       if (pathname === "/api/tasks") {
         handleTasksListRead(res, repositories);
+        return true;
+      }
+
+      if (pathname === "/api/agents") {
+        await handleAgentsListRead(res, monitorProviders);
+        return true;
+      }
+
+      const agentFilesRoute = resolveAgentFilesRoute(pathname);
+      if (agentFilesRoute !== null) {
+        if (agentFilesRoute.filePath === null) {
+          await handleAgentFilesListRead(res, monitorProviders, agentFilesRoute.agentId);
+          return true;
+        }
+
+        await handleAgentFileRead(res, monitorProviders, agentFilesRoute.agentId, agentFilesRoute.filePath);
+        return true;
+      }
+
+      const agentStatusSuffix = extractSuffix(pathname, "/api/agents/");
+      if (agentStatusSuffix !== null) {
+        if (!agentStatusSuffix.endsWith("/status")) {
+          throw new HttpError(404, "NOT_FOUND", "Route not found");
+        }
+
+        const agentId = agentStatusSuffix.slice(0, -"/status".length);
+        if (!agentId) {
+          throw new HttpError(404, "NOT_FOUND", "Route not found");
+        }
+
+        await handleAgentStatusRead(res, monitorProviders, decodeURIComponent(agentId));
         return true;
       }
 

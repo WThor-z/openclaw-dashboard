@@ -1,7 +1,7 @@
 import React, { type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { DashboardPage } from "../pages/DashboardPage.js";
+import { AgentWorkspacePage } from "../pages/AgentWorkspacePage.js";
 import { LoginPage } from "../pages/LoginPage.js";
 import { AuthProvider, useAuth } from "./auth.js";
 
@@ -38,7 +38,7 @@ export function App() {
           <Route
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <AgentWorkspacePage />
               </ProtectedRoute>
             }
             path="/dashboard"

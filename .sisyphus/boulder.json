@@ -1,10 +1,10 @@
 {
-  "active_plan": "C:\\Users\\25911\\Desktop\\openclaw dashboard\\.sisyphus\\plans\\openclaw-dashboard-control-plane.md",
+  "active_plan": "C:\\Users\\25911\\Desktop\\openclaw dashboard\\.sisyphus\\plans\\openclaw-agent-workspace.md",
   "started_at": "2026-03-04T10:26:44.243Z",
   "session_ids": [
-    "ses_3479d44a3ffeoW5ucvPMBRi89w"
+    "ses_3411c8285ffeMKv1B1Ci6b1965"
   ],
-  "plan_name": "openclaw-dashboard-control-plane",
+  "plan_name": "openclaw-agent-workspace",
   "worktree_path": "C:\\Users\\25911\\Desktop\\openclaw dashboard",
   "agent": "atlas"
 }

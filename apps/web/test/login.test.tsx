@@ -48,8 +48,8 @@ describe("web shell auth", () => {
     });
     fireEvent.click(screen.getByTestId("connect-button"));
 
-    expect(await screen.findByTestId("nav-events")).toBeTruthy();
-    expect(await screen.findByTestId("nav-config")).toBeTruthy();
+    expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
+    expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
     expect(setItemSpy).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("daemonToken")).toBeNull();
 

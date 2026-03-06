@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { HttpError, sendJson } from "../../middleware/error-handler.js";
+import { createMonitorProvidersFromEnv } from "../../monitoring/collectors.js";
 import { redactSecrets } from "../read/redaction.js";
+import { writeAgentFile } from "./agents.js";
 import {
   normalizeAndValidateWebhookEndpoint,
   WebhookEndpointPolicyError
@@ -190,6 +192,7 @@ function persistAuditEvent({ repositories, dedupeKey, workspaceId, taskId, kind,
 
 export function createControlApiRouter({
   repositories,
+  monitorProviders = createMonitorProvidersFromEnv(),
   readOnlyMode = false,
   writeArmWindowMs = DEFAULT_ARM_WINDOW_MS,
   webhookEndpointPolicy = {}
@@ -342,6 +345,53 @@ export function createControlApiRouter({
     }
 
     throw new HttpError(404, "NOT_FOUND", "Route not found");
+  }
+
+  function decodePathOrThrow(value) {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      throw new HttpError(400, "INVALID_FILE_PATH", "File path is invalid");
+    }
+  }
+
+  function resolveAgentFileWriteRoute(pathname) {
+    const prefix = "/api/control/agents/";
+    if (!pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const suffix = pathname.slice(prefix.length);
+    if (!suffix) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const firstSlash = suffix.indexOf("/");
+    if (firstSlash <= 0) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const encodedAgentId = suffix.slice(0, firstSlash);
+    const remainder = suffix.slice(firstSlash + 1);
+
+    if (!remainder.startsWith("files/")) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const encodedFilePath = remainder.slice("files/".length);
+    if (!encodedFilePath) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const agentId = decodePathOrThrow(encodedAgentId);
+    if (!agentId) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    return {
+      agentId,
+      filePath: decodePathOrThrow(encodedFilePath)
+    };
   }
 
   async function normalizeEndpointOrThrow(endpointUrl) {
@@ -656,6 +706,36 @@ export function createControlApiRouter({
           );
           return true;
         }
+      }
+
+      const agentFileRoute = resolveAgentFileWriteRoute(pathname);
+      if (agentFileRoute !== null) {
+        await handleMutation(
+          req,
+          res,
+          pathname,
+          `control.agents.files.write:${agentFileRoute.agentId}:${agentFileRoute.filePath}`,
+          async (body) => {
+            const result = await writeAgentFile({
+              body,
+              monitorProviders,
+              agentId: agentFileRoute.agentId,
+              requestedPath: agentFileRoute.filePath
+            });
+
+            return {
+              status: 200,
+              body: {
+                ok: true,
+                path: result.path,
+                modifiedAt: result.modifiedAt
+              },
+              workspaceId: result.workspaceId,
+              kind: "control.agents.files.write"
+            };
+          }
+        );
+        return true;
       }
 
       if (pathname === "/api/control/config/diff") {

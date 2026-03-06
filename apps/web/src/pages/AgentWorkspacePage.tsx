@@ -1,13 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentList } from "../components/AgentList.js";
-import { Agent } from "../components/AgentCard.js";
-import { EmptyState } from "../components/EmptyState.js";
-import { ErrorBoundary } from "../components/ErrorBoundary.js";
-import { FileTree, WorkspaceFile } from "../components/FileTree.js";
-import { MarkdownEditor } from "../components/MarkdownEditor.js";
-import { MarkdownViewer } from "../components/MarkdownViewer.js";
-import { Skeleton } from "../components/Skeleton.js";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { useAuth } from "../app/auth.js";
+import { AgentList } from "../components/AgentList.js";
+import { type Agent } from "../components/AgentCard.js";
+import { EmptyState } from "../components/EmptyState.js";
+import { Skeleton } from "../components/Skeleton.js";
 import { useAgentStatus } from "../hooks/useAgentStatus.js";
 
 interface DaemonWorkspaceNode {
@@ -17,129 +15,116 @@ interface DaemonWorkspaceNode {
   children?: DaemonWorkspaceNode[];
 }
 
-function toFileTreeNodes(nodes: DaemonWorkspaceNode[]): WorkspaceFile[] {
-  return nodes.map((node) => ({
-    name: node.name,
-    path: node.path,
-    kind: node.isDirectory ? "directory" : "file",
-    children: Array.isArray(node.children) ? toFileTreeNodes(node.children) : undefined
-  }));
-}
+const DEFAULT_PIN_LIMIT = 3;
 
-function findNodeByPath(items: WorkspaceFile[], targetPath: string): WorkspaceFile | null {
-  for (const item of items) {
-    if (item.path === targetPath) {
-      return item;
+function collectMarkdownPaths(nodes: DaemonWorkspaceNode[]): string[] {
+  const paths: string[] = [];
+
+  for (const node of nodes) {
+    if (node.isDirectory) {
+      paths.push(...collectMarkdownPaths(Array.isArray(node.children) ? node.children : []));
+      continue;
     }
-    if (item.children) {
-      const match = findNodeByPath(item.children, targetPath);
-      if (match) {
-        return match;
-      }
+
+    if (/\.md$/i.test(node.path)) {
+      paths.push(node.path);
     }
   }
-  return null;
+
+  return paths;
+}
+
+function getPinnedNotesStorageKey(agentId: string) {
+  return `agent-workspace:pinned-notes:${agentId}`;
+}
+
+function loadStoredPinnedNotes(agentId: string) {
+  if (typeof window === "undefined") {
+    return [] as string[];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(getPinnedNotesStorageKey(agentId));
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePinnedNotes(agentId: string, paths: string[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(getPinnedNotesStorageKey(agentId), JSON.stringify(paths));
 }
 
 export function AgentWorkspacePage() {
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [workspaceItems, setWorkspaceItems] = useState<WorkspaceFile[]>([]);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedPathKind, setSelectedPathKind] = useState<"file" | "directory" | null>(null);
-  const [selectedFileContent, setSelectedFileContent] = useState<string>("");
-  const [selectedFileModifiedAt, setSelectedFileModifiedAt] = useState<string | null>(null);
-  const [selectedFileError, setSelectedFileError] = useState<string | null>(null);
-  const [isFileLoading, setIsFileLoading] = useState(false);
-  const [isEditingFile, setIsEditingFile] = useState(false);
-  const closeGuardRef = useRef<(() => boolean) | null>(null);
+  const navigate = useNavigate();
   const { token } = useAuth();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [availableMarkdownPaths, setAvailableMarkdownPaths] = useState<string[]>([]);
+  const [pinnedNotePaths, setPinnedNotePaths] = useState<string[]>([]);
+  const [selectedQuickNotePath, setSelectedQuickNotePath] = useState<string | null>(null);
+  const [quickNoteContent, setQuickNoteContent] = useState("");
+  const [quickNoteModifiedAt, setQuickNoteModifiedAt] = useState<string | null>(null);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [isQuickNoteLoading, setIsQuickNoteLoading] = useState(false);
+  const [quickNoteError, setQuickNoteError] = useState<string | null>(null);
+
+  const selectedAgent = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [agents, selectedAgentId]
+  );
+
   const selectedAgentStatus = useAgentStatus({
     agentId: isDrawerOpen ? selectedAgent?.id ?? null : null,
     token,
     initialStatus: selectedAgent?.status ?? "offline"
   });
 
-  const handleAgentClick = (agent: Agent) => {
-    setSelectedAgent(agent);
+  const handleAgentClick = useCallback((agent: Agent) => {
+    setSelectedAgentId(agent.id);
     setIsDrawerOpen(true);
-  };
-
-  const closeDrawer = useCallback(() => {
-    const guard = closeGuardRef.current;
-    if (guard && !guard()) {
-      return;
-    }
-
-    setIsDrawerOpen(false);
-    setIsEditingFile(false);
-    closeGuardRef.current = null;
   }, []);
 
-  const loadFileContent = useCallback(
-    async (agentId: string, filePath: string) => {
-      setIsFileLoading(true);
-      setSelectedFileError(null);
-
-      try {
-        const response = await fetch(
-          `/api/agents/${encodeURIComponent(agentId)}/files/${encodeURIComponent(filePath)}`,
-          {
-            headers: {
-              authorization: `Bearer ${token ?? ""}`
-            }
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error("Failed to load file content");
-        }
-
-        const body = (await response.json()) as {
-          content?: string;
-          modifiedAt?: string;
-        };
-
-        setSelectedFileContent(typeof body.content === "string" ? body.content : "");
-        setSelectedFileModifiedAt(
-          typeof body.modifiedAt === "string" && body.modifiedAt.length > 0 ? body.modifiedAt : null
-        );
-      } catch {
-        setSelectedFileContent("");
-        setSelectedFileModifiedAt(null);
-        setSelectedFileError("Failed to load file content.");
-      } finally {
-        setIsFileLoading(false);
-      }
-    },
-    [token]
-  );
+  const closeDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    setSelectedQuickNotePath(null);
+    setQuickNoteContent("");
+    setQuickNoteModifiedAt(null);
+    setQuickNoteError(null);
+  }, []);
 
   useEffect(() => {
-    if (!isDrawerOpen || !selectedAgent) {
+    if (!isDrawerOpen || !selectedAgent || !token) {
       return;
     }
 
-    let isCancelled = false;
+    let cancelled = false;
 
-    const loadWorkspace = async () => {
+    const loadQuickNotes = async () => {
       setIsWorkspaceLoading(true);
       setWorkspaceError(null);
-      setWorkspaceItems([]);
-      setSelectedPath(null);
-      setSelectedPathKind(null);
-      setSelectedFileContent("");
-      setSelectedFileModifiedAt(null);
-      setSelectedFileError(null);
-      setIsEditingFile(false);
-      closeGuardRef.current = null;
+      setAvailableMarkdownPaths([]);
+      setPinnedNotePaths([]);
+      setSelectedQuickNotePath(null);
+      setQuickNoteContent("");
+      setQuickNoteModifiedAt(null);
+      setQuickNoteError(null);
 
       try {
         const response = await fetch(`/api/agents/${encodeURIComponent(selectedAgent.id)}/files`, {
           headers: {
-            authorization: `Bearer ${token ?? ""}`
+            authorization: `Bearer ${token}`
           }
         });
 
@@ -148,253 +133,350 @@ export function AgentWorkspacePage() {
         }
 
         const body = (await response.json()) as { items?: DaemonWorkspaceNode[] };
-        if (isCancelled) {
+        if (cancelled) {
           return;
         }
 
-        const sourceItems = Array.isArray(body.items) ? body.items : [];
-        setWorkspaceItems(toFileTreeNodes(sourceItems));
+        const markdownPaths = collectMarkdownPaths(Array.isArray(body.items) ? body.items : []);
+        const storedPaths = loadStoredPinnedNotes(selectedAgent.id);
+        const validStoredPaths = storedPaths.filter((path) => markdownPaths.includes(path));
+        const nextPinnedPaths =
+          validStoredPaths.length > 0 ? validStoredPaths : markdownPaths.slice(0, DEFAULT_PIN_LIMIT);
+
+        setAvailableMarkdownPaths(markdownPaths);
+        setPinnedNotePaths(nextPinnedPaths);
+        setSelectedQuickNotePath(nextPinnedPaths[0] ?? null);
+        savePinnedNotes(selectedAgent.id, nextPinnedPaths);
       } catch {
-        if (isCancelled) {
-          return;
+        if (!cancelled) {
+          setWorkspaceError("Failed to load quick-view files.");
         }
-        setWorkspaceError("Failed to load workspace files.");
       } finally {
-        if (!isCancelled) {
+        if (!cancelled) {
           setIsWorkspaceLoading(false);
         }
       }
     };
 
-    void loadWorkspace();
+    void loadQuickNotes();
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
     };
   }, [isDrawerOpen, selectedAgent, token]);
 
-  const isEditableTextFile = useMemo(() => {
-    if (selectedPathKind !== "file" || !selectedPath) {
-      return false;
+  useEffect(() => {
+    if (!isDrawerOpen || !selectedAgent || !selectedQuickNotePath || !token) {
+      return;
     }
-    return /\.(md|txt)$/i.test(selectedPath);
-  }, [selectedPath, selectedPathKind]);
 
-  const handleFileSelect = useCallback(
+    let cancelled = false;
+
+    const loadQuickNoteContent = async () => {
+      setIsQuickNoteLoading(true);
+      setQuickNoteError(null);
+
+      try {
+        const response = await fetch(
+          `/api/agents/${encodeURIComponent(selectedAgent.id)}/files/${encodeURIComponent(selectedQuickNotePath)}`,
+          {
+            headers: {
+              authorization: `Bearer ${token}`
+            }
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to load file content");
+        }
+
+        const body = (await response.json()) as { content?: string; modifiedAt?: string };
+        if (cancelled) {
+          return;
+        }
+
+        setQuickNoteContent(typeof body.content === "string" ? body.content : "");
+        setQuickNoteModifiedAt(
+          typeof body.modifiedAt === "string" && body.modifiedAt.length > 0 ? body.modifiedAt : null
+        );
+      } catch {
+        if (!cancelled) {
+          setQuickNoteContent("");
+          setQuickNoteModifiedAt(null);
+          setQuickNoteError("Failed to load quick note.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsQuickNoteLoading(false);
+        }
+      }
+    };
+
+    void loadQuickNoteContent();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDrawerOpen, selectedAgent, selectedQuickNotePath, token]);
+
+  const handlePinnedNoteToggle = useCallback(
     (path: string) => {
-      const selectedNode = findNodeByPath(workspaceItems, path);
-      setSelectedPath(path);
-      setSelectedPathKind(selectedNode?.kind ?? null);
-
-      if (!selectedNode || selectedNode.kind === "directory" || !selectedAgent) {
-        setIsEditingFile(false);
-        setSelectedFileError(null);
-        setSelectedFileContent("");
-        setSelectedFileModifiedAt(null);
-        closeGuardRef.current = null;
+      if (!selectedAgent) {
         return;
       }
 
-      setIsEditingFile(false);
-      closeGuardRef.current = null;
-      void loadFileContent(selectedAgent.id, path);
+      setPinnedNotePaths((currentPaths) => {
+        const nextPaths = currentPaths.includes(path)
+          ? currentPaths.filter((entry) => entry !== path)
+          : [...currentPaths, path];
+
+        savePinnedNotes(selectedAgent.id, nextPaths);
+
+        if (nextPaths.length === 0) {
+          setSelectedQuickNotePath(null);
+          setQuickNoteContent("");
+          setQuickNoteModifiedAt(null);
+          setQuickNoteError(null);
+        } else if (!nextPaths.includes(selectedQuickNotePath ?? "")) {
+          setSelectedQuickNotePath(nextPaths[0]);
+        }
+
+        return nextPaths;
+      });
     },
-    [loadFileContent, selectedAgent, workspaceItems]
+    [selectedAgent, selectedQuickNotePath]
   );
 
-  const handleLeaveEditor = useCallback(() => {
-    const guard = closeGuardRef.current;
-    if (guard && !guard()) {
+  const handleOpenFullWorkspace = useCallback(() => {
+    if (!selectedAgent) {
       return;
     }
-    setIsEditingFile(false);
-    closeGuardRef.current = null;
-  }, []);
+
+    setIsDrawerOpen(false);
+    navigate(`/agents/${encodeURIComponent(selectedAgent.id)}/workspace`);
+  }, [navigate, selectedAgent]);
+
+  const overviewStats = useMemo(
+    () => [
+      { label: "Agents", value: String(agents.length) },
+      { label: "Online", value: String(agents.filter((agent) => agent.status !== "offline").length) },
+      { label: "Pinned Notes", value: String(pinnedNotePaths.length) }
+    ],
+    [agents, pinnedNotePaths.length]
+  );
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 text-zinc-200 font-mono selection:bg-indigo-500/30 overflow-hidden">
-      {/* Sidebar */}
-      <aside 
+    <div className="flex h-screen w-full overflow-hidden bg-zinc-950 font-mono text-zinc-200 selection:bg-indigo-500/30">
+      <aside
         data-testid="drawer-placeholder"
-        className="w-64 border-r border-zinc-800 bg-zinc-900/50 flex flex-col"
+        className="hidden w-72 shrink-0 border-r border-zinc-800 bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.2),_transparent_55%),linear-gradient(180deg,_rgba(24,24,27,0.96),_rgba(9,9,11,0.98))] p-6 lg:flex lg:flex-col"
       >
-        <div className="p-6 border-b border-zinc-800">
-          <div className="flex items-center gap-2 text-indigo-400">
-            <div className="w-3 h-3 rounded-full bg-indigo-500 animate-pulse" />
-            <span className="text-xs font-bold tracking-widest uppercase">System Active</span>
-          </div>
+        <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/50 p-5 shadow-2xl shadow-black/20">
+          <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-indigo-300">Overview</p>
+          <h2 className="mt-3 text-2xl font-bold tracking-tight text-zinc-50">Agent Workspace</h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-400">
+            Keep the dashboard focused on status and quick notes. Open the full workspace only when you need file browsing or editing.
+          </p>
         </div>
-        <div className="flex-1 p-4 space-y-2">
-          <div className="h-4 w-3/4 bg-zinc-800 rounded animate-pulse" />
-          <div className="h-4 w-1/2 bg-zinc-800 rounded animate-pulse delay-75" />
-          <div className="h-4 w-2/3 bg-zinc-800 rounded animate-pulse delay-150" />
+
+        <div className="mt-6 grid gap-3">
+          {overviewStats.map((stat) => (
+            <div key={stat.label} className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">{stat.label}</p>
+              <p className="mt-2 text-2xl font-bold text-zinc-100">{stat.value}</p>
+            </div>
+          ))}
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-16 border-b border-zinc-800 flex items-center px-8 bg-zinc-900/30 backdrop-blur-md">
-          <h1 
-            data-testid="agent-workspace-title"
-            className="text-xl font-bold tracking-tight text-zinc-100"
-          >
-            Agent Workspace
-          </h1>
+      <main className="relative flex flex-1 flex-col overflow-hidden">
+        <header className="border-b border-zinc-800 bg-zinc-900/30 px-8 backdrop-blur-md">
+          <div className="flex h-16 items-center justify-between gap-4">
+            <div>
+              <h1 data-testid="agent-workspace-title" className="text-xl font-bold tracking-tight text-zinc-100">
+                Agent Workspace
+              </h1>
+              <p className="text-xs text-zinc-500">Dashboard overview, live status, and pinned markdown quick views.</p>
+            </div>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-8" data-testid="agent-list-placeholder">
-          <div className="max-w-6xl mx-auto">
-            <AgentList onAgentClick={handleAgentClick} />
+          <div className="mx-auto max-w-6xl">
+            <AgentList onAgentClick={handleAgentClick} onAgentsChange={setAgents} />
           </div>
         </div>
 
-        {/* Right-side Drawer */}
-        {isDrawerOpen && (
-          <div 
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity"
+        {isDrawerOpen ? (
+          <div
+            aria-hidden="true"
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
             onClick={closeDrawer}
           />
-        )}
-        
-        <div 
-          className={`fixed top-0 right-0 h-full bg-zinc-900 border-l border-zinc-800 shadow-2xl z-50 transition-transform duration-300 ease-in-out transform ${
+        ) : null}
+
+        <div
+          className={`fixed right-0 top-0 z-50 flex h-full w-[620px] max-w-full transform flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl transition-transform duration-300 ease-in-out ${
             isDrawerOpen ? "translate-x-0" : "translate-x-full"
           }`}
-          style={{ width: "600px", maxWidth: "100vw" }}
         >
-          {selectedAgent && (
-            <div className="flex flex-col h-full">
-              <div className="h-16 border-b border-zinc-800 flex items-center justify-between px-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center text-zinc-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
-                  </div>
-                  <h2 className="font-bold text-zinc-100">{selectedAgent.name}</h2>
+          {selectedAgent ? (
+            <>
+              <div className="flex h-16 items-center justify-between border-b border-zinc-800 px-6">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Quick View</p>
+                  <h2 className="truncate text-lg font-bold text-zinc-100">{selectedAgent.name}</h2>
                 </div>
-                <button 
+                <div
+                  aria-label="Close quick view"
+                  className="cursor-pointer rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
                   onClick={closeDrawer}
-                  className="p-2 hover:bg-zinc-800 rounded-lg transition-colors text-zinc-500 hover:text-zinc-300"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                </button>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                </div>
               </div>
-              
-              <div className="flex-1 min-h-0 flex flex-col p-6 gap-6">
-                <section>
-                  <h3 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Identity</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-lg p-4">
-                      <span className="block text-[10px] text-zinc-500 uppercase mb-1">Agent ID</span>
-                      <span className="text-sm font-mono text-zinc-300">{selectedAgent.id}</span>
-                    </div>
-                    <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-lg p-4">
-                      <span className="block text-[10px] text-zinc-500 uppercase mb-1">Role</span>
-                      <span className="text-sm text-zinc-300">{selectedAgent.role}</span>
+
+              <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
+                <section className="grid gap-4 rounded-2xl border border-zinc-800/70 bg-zinc-950/40 p-5 md:grid-cols-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Agent ID</p>
+                    <p className="mt-2 text-sm text-zinc-200">{selectedAgent.id}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Role</p>
+                    <p className="mt-2 text-sm text-zinc-200">{selectedAgent.role}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Workspace</p>
+                    <p className="mt-2 break-all text-sm text-zinc-300">{selectedAgent.workspacePath}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Status</p>
+                    <div className="mt-2 flex items-center gap-3">
+                      <span
+                        className={`status-indicator ${
+                          selectedAgentStatus === "idle"
+                            ? "status-idle"
+                            : selectedAgentStatus === "busy"
+                              ? "status-busy"
+                              : selectedAgentStatus === "offline"
+                                ? "status-offline"
+                                : "status-error"
+                        }`}
+                      />
+                      <span className="text-sm capitalize text-zinc-300">{selectedAgentStatus}</span>
                     </div>
                   </div>
                 </section>
 
-                <section>
-                  <h3 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Status</h3>
-                  <div className="flex items-center gap-4 bg-zinc-950/50 border border-zinc-800/50 rounded-lg p-4">
-                    <span className={`status-indicator ${
-                      selectedAgentStatus === "idle" ? "status-idle" :
-                      selectedAgentStatus === "busy" ? "status-busy" :
-                      selectedAgentStatus === "offline" ? "status-offline" :
-                      "status-error"
-                    }`} />
-                    <span className="text-sm text-zinc-300 capitalize">{selectedAgentStatus}</span>
+                <section className="rounded-2xl border border-zinc-800/70 bg-zinc-950/40 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-100">Quick Notes</h3>
+                      <p className="mt-1 text-xs text-zinc-500">Choose which markdown files stay pinned for this agent.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenFullWorkspace}
+                      className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-800"
+                    >
+                      Open Full Workspace
+                    </button>
                   </div>
-                </section>
 
-                <section className="flex-1 min-h-0">
-                  <h3 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Workspace</h3>
-                  <ErrorBoundary fallbackTitle="Workspace pane failed to render.">
-                    <div className="h-full min-h-0 border border-zinc-800/70 rounded-lg overflow-hidden bg-zinc-950/40 flex">
-                      <div className="w-72 min-w-72 border-r border-zinc-800/70 p-3 overflow-auto">
+                  <div className="mt-5 grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)]">
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-zinc-800/70 bg-zinc-900/50 p-4">
+                        <p className="text-[10px] uppercase tracking-[0.3em] text-zinc-500">Pinned Files</p>
                         {isWorkspaceLoading ? (
-                          <div className="space-y-2">
-                            {Array.from({ length: 6 }).map((_, index) => (
+                          <div className="mt-3 space-y-2">
+                            {Array.from({ length: 4 }).map((_, index) => (
                               <Skeleton key={index} variant="line" className="h-5" />
                             ))}
                           </div>
                         ) : workspaceError ? (
-                          <EmptyState title="Workspace unavailable" message={workspaceError} className="px-4 py-6" />
-                        ) : workspaceItems.length === 0 ? (
-                          <EmptyState title="Workspace is empty." className="px-4 py-6" />
+                          <p className="mt-3 text-xs text-red-400">{workspaceError}</p>
+                        ) : availableMarkdownPaths.length === 0 ? (
+                          <p className="mt-3 text-xs text-zinc-500">No markdown files available for quick view.</p>
                         ) : (
-                          <FileTree items={workspaceItems} selectedPath={selectedPath} onSelect={handleFileSelect} />
-                        )}
-                      </div>
+                          <div className="mt-3 space-y-2">
+                            {availableMarkdownPaths.map((path) => {
+                              const checked = pinnedNotePaths.includes(path);
 
-                      <div className="flex-1 min-w-0 p-4 overflow-auto">
-                        {!selectedPath ? (
-                          <p className="text-xs text-zinc-500">Select a file to view content.</p>
-                        ) : selectedPathKind === "directory" ? (
-                          <p className="text-xs text-zinc-500">Selected path is a directory.</p>
-                        ) : isFileLoading ? (
-                          <div className="space-y-3">
-                            <Skeleton variant="line" className="w-2/3" />
-                            <Skeleton variant="line" className="w-1/3 h-3" />
-                            <Skeleton variant="panel" className="h-64" />
-                          </div>
-                        ) : selectedFileError ? (
-                          <p className="text-xs text-red-400">{selectedFileError}</p>
-                        ) : (
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-xs text-zinc-400 truncate">{selectedPath}</p>
-                                <p className="text-[10px] text-zinc-500">
-                                  {selectedFileModifiedAt ? `Modified: ${selectedFileModifiedAt}` : "Modified: unknown"}
-                                </p>
-                              </div>
-
-                              {isEditableTextFile ? (
-                                isEditingFile ? (
-                                  <button
-                                    type="button"
-                                    onClick={handleLeaveEditor}
-                                    className="px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                                  >
-                                    Back to preview
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setIsEditingFile(true)}
-                                    className="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-500"
-                                  >
-                                    Edit
-                                  </button>
-                                )
-                              ) : (
-                                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Read only</span>
-                              )}
-                            </div>
-
-                            {isEditableTextFile && isEditingFile ? (
-                              <MarkdownEditor
-                                agentId={selectedAgent.id}
-                                filePath={selectedPath}
-                                initialContent={selectedFileContent}
-                                onSaved={() => void loadFileContent(selectedAgent.id, selectedPath)}
-                                onRequestClose={(guard) => {
-                                  closeGuardRef.current = guard;
-                                }}
-                              />
-                            ) : (
-                              <MarkdownViewer content={selectedFileContent} />
-                            )}
+                              return (
+                                <label key={path} className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 hover:bg-zinc-800/60">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => handlePinnedNoteToggle(path)}
+                                    className="mt-0.5 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-indigo-500 focus:ring-indigo-500"
+                                  />
+                                  <span className="min-w-0 break-all text-xs text-zinc-300">{path}</span>
+                                </label>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
+
+                      {pinnedNotePaths.length > 0 ? (
+                        <div className="flex flex-wrap gap-2">
+                          {pinnedNotePaths.map((path) => (
+                            <button
+                              key={path}
+                              type="button"
+                              onClick={() => setSelectedQuickNotePath(path)}
+                              className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                                selectedQuickNotePath === path
+                                  ? "border-indigo-500 bg-indigo-500/10 text-indigo-200"
+                                  : "border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+                              }`}
+                            >
+                              {path}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
-                  </ErrorBoundary>
+
+                    <div className="min-w-0 rounded-xl border border-zinc-800/70 bg-zinc-950/60 p-4">
+                      {!selectedQuickNotePath ? (
+                        <EmptyState
+                          title="Pick a pinned note"
+                          message="Select at least one markdown file to keep it available in this quick-view drawer."
+                          className="px-4 py-8"
+                        />
+                      ) : isQuickNoteLoading ? (
+                        <div className="space-y-3">
+                          <Skeleton variant="line" className="w-1/2" />
+                          <Skeleton variant="line" className="w-1/3 h-3" />
+                          <Skeleton variant="panel" className="h-72" />
+                        </div>
+                      ) : quickNoteError ? (
+                        <p className="text-xs text-red-400">{quickNoteError}</p>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs text-zinc-400">{selectedQuickNotePath}</p>
+                              <p className="text-[10px] text-zinc-500">
+                                {quickNoteModifiedAt ? `Modified: ${quickNoteModifiedAt}` : "Modified: unknown"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="max-h-[28rem] overflow-auto">
+                            <article className="prose prose-invert max-w-none prose-pre:overflow-x-auto">
+                              <div className="text-sm leading-7 text-zinc-200 whitespace-pre-wrap">{quickNoteContent}</div>
+                            </article>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </section>
               </div>
-            </div>
-          )}
+            </>
+          ) : null}
         </div>
       </main>
     </div>

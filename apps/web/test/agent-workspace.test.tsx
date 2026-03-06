@@ -34,7 +34,22 @@ afterEach(() => {
 });
 
 describe("AgentWorkspace layout", () => {
-  it("renders the layout shell with placeholders", async () => {
+  it("renders the overview shell instead of a permanent loading sidebar", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
+      const requestUrl = typeof input === "string" ? input : input.toString();
+
+      if (requestUrl === "/api/agents") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
+    });
+
     render(
       <TestWrapper>
         <AgentWorkspacePage />
@@ -44,9 +59,10 @@ describe("AgentWorkspace layout", () => {
     expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
     expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
     expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
+    expect(await screen.findByText("Overview")).toBeTruthy();
   });
 
-  it("polls selected agent status every 3s and falls back to offline on errors", async () => {
+  it("keeps the last known status through a transient polling failure", async () => {
     let intervalHandler: (() => void) | null = null;
     vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, timeout?: number) => {
       if (timeout === 3000 && typeof handler === "function") {
@@ -58,6 +74,8 @@ describe("AgentWorkspace layout", () => {
 
     const statusQueue: Array<{ ok: boolean; status: "idle" | "busy" | "offline" | "error" }> = [
       { ok: true, status: "busy" },
+      { ok: false, status: "offline" },
+      { ok: false, status: "offline" },
       { ok: false, status: "offline" }
     ];
 
@@ -146,6 +164,19 @@ describe("AgentWorkspace layout", () => {
     });
 
     await waitFor(() => {
+      expect(screen.getByText("busy", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
+    });
+
+    await act(async () => {
+      intervalHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      intervalHandler?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
       expect(screen.getByText("offline", { selector: "span.text-sm.text-zinc-300.capitalize" })).toBeTruthy();
     });
 
@@ -159,5 +190,75 @@ describe("AgentWorkspace layout", () => {
       (call) => (typeof call[0] === "string" ? call[0] : call[0].toString()) === "/api/agents/agent-1/status"
     ).length;
     expect(callCountAfterClose).toBe(callCountBeforeClose);
+  });
+
+  it("opens a quick-view drawer with pinned notes actions instead of the full workspace browser", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = typeof input === "string" ? input : input.toString();
+
+      if (requestUrl === "/api/agents") {
+        expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
+
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "agent-1",
+                  name: "Alpha",
+                  role: "worker",
+                  workspacePath: "/workspace/alpha",
+                  status: "busy",
+                  updatedAt: "2026-03-06T00:00:00.000Z"
+                }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/status") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ status: "busy", updatedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                { name: "README.md", path: "README.md", isDirectory: false },
+                { name: "notes", path: "notes", isDirectory: true, children: [{ name: "PLAN.md", path: "notes/PLAN.md", isDirectory: false }] }
+              ]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          )
+        );
+      }
+
+      return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
+    });
+
+    render(
+      <TestWrapper>
+        <AgentWorkspacePage />
+      </TestWrapper>
+    );
+
+    fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
+
+    expect(await screen.findByText("Quick Notes")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open Full Workspace" })).toBeTruthy();
   });
 });

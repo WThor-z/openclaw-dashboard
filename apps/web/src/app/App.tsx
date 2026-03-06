@@ -2,6 +2,7 @@ import React, { type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AgentWorkspacePage } from "../pages/AgentWorkspacePage.js";
+import { AgentWorkspaceBrowserPage } from "../pages/AgentWorkspaceBrowserPage.js";
 import { LoginPage } from "../pages/LoginPage.js";
 import { AuthProvider, useAuth } from "./auth.js";
 
@@ -42,6 +43,14 @@ export function App() {
               </ProtectedRoute>
             }
             path="/dashboard"
+          />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AgentWorkspaceBrowserPage />
+              </ProtectedRoute>
+            }
+            path="/agents/:agentId/workspace"
           />
           <Route element={<RootRedirect />} path="*" />
         </Routes>

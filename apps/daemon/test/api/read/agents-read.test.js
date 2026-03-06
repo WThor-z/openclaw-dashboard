@@ -168,6 +168,7 @@ async function createLegacyConfigFixture() {
 
   process.env.HOME = baseDir;
   process.env.USERPROFILE = baseDir;
+  return { baseDir };
 }
 
 async function createRelativeLegacyConfigFixture() {
@@ -350,6 +351,52 @@ describe("read agent APIs", () => {
         updatedAt: null
       }
     ]);
+  });
+
+  it("uses gateway workspace matches to override configured offline statuses", async () => {
+    const repositories = createFixtureRepositories();
+    const { baseDir } = await createLegacyConfigFixture();
+    const monitorProviders = {
+      async gateway() {
+        return {
+          snapshot: {
+            agents: [
+              {
+                id: "runtime-1",
+                agent: "runtime-alpha",
+                workspace: path.join(baseDir, "workspace-main"),
+                state: "running",
+                updatedAt: "2026-03-06T12:00:00.000Z"
+              }
+            ]
+          }
+        };
+      }
+    };
+    const server = await startServer({ repositories, monitorProviders });
+    const baseUrl = endpointFrom(server.address());
+
+    const agentsResponse = await authorizedGet(`${baseUrl}/api/agents`);
+    const agentsBody = await agentsResponse.json();
+    const statusResponse = await authorizedGet(`${baseUrl}/api/agents/main/status`);
+    const statusBody = await statusResponse.json();
+
+    expect(agentsResponse.status).toBe(200);
+    expect(agentsBody.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "main",
+          status: "busy",
+          updatedAt: "2026-03-06T12:00:00.000Z"
+        })
+      ])
+    );
+
+    expect(statusResponse.status).toBe(200);
+    expect(statusBody).toEqual({
+      status: "busy",
+      updatedAt: "2026-03-06T12:00:00.000Z"
+    });
   });
 
   it("lists files for completed agents whose workspacePath is relative", async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type AgentStatus = "idle" | "busy" | "offline" | "error";
 
@@ -14,9 +14,11 @@ type UseAgentStatusParams = {
 
 export function useAgentStatus({ agentId, token, initialStatus }: UseAgentStatusParams) {
   const [status, setStatus] = useState<AgentStatus>(initialStatus);
+  const consecutiveFailuresRef = useRef(0);
 
   useEffect(() => {
     setStatus(initialStatus);
+    consecutiveFailuresRef.current = 0;
   }, [agentId, initialStatus]);
 
   useEffect(() => {
@@ -52,6 +54,7 @@ export function useAgentStatus({ agentId, token, initialStatus }: UseAgentStatus
           return;
         }
 
+        consecutiveFailuresRef.current = 0;
         setStatus(isAgentStatus(payload.status) ? payload.status : "offline");
       } catch (error) {
         if (!active) {
@@ -62,7 +65,10 @@ export function useAgentStatus({ agentId, token, initialStatus }: UseAgentStatus
           return;
         }
 
-        setStatus("offline");
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= 3) {
+          setStatus("offline");
+        }
       }
     };
 

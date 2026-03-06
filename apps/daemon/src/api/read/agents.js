@@ -33,6 +33,95 @@ function toAgentItem(entry) {
   return item;
 }
 
+function normalizeComparablePath(targetPath) {
+  return typeof targetPath === "string" && targetPath.trim().length > 0
+    ? path.normalize(targetPath).replace(/[\\/]+$/, "").toLowerCase()
+    : null;
+}
+
+function loadGatewayAgents(snapshot) {
+  return Array.isArray(snapshot?.snapshot?.agents) ? snapshot.snapshot.agents : [];
+}
+
+function compareIsoDateDescending(left, right) {
+  const leftValue = typeof left === "string" ? left : "";
+  const rightValue = typeof right === "string" ? right : "";
+
+  if (leftValue === rightValue) {
+    return 0;
+  }
+
+  return leftValue > rightValue ? -1 : 1;
+}
+
+function findGatewayAgentMatch(agentEntry, gatewayAgents, { allowAgentAliasFallback = false } = {}) {
+  const agentId = typeof agentEntry?.agent === "string" ? agentEntry.agent : null;
+  const workspaceRoot = resolveRegistryWorkspacePath(agentEntry);
+  const normalizedWorkspace = normalizeComparablePath(workspaceRoot);
+  const normalizedRawWorkspace = normalizeComparablePath(agentEntry?.workspacePath);
+
+  const candidates = gatewayAgents
+    .map((entry) => {
+      const gatewayWorkspace = normalizeComparablePath(entry?.workspace ?? entry?.workspacePath);
+      const matchesWorkspace =
+        (normalizedWorkspace !== null && gatewayWorkspace === normalizedWorkspace) ||
+        (normalizedRawWorkspace !== null && gatewayWorkspace === normalizedRawWorkspace);
+      const matchesId = agentId !== null && entry?.id === agentId;
+      const matchesAgentAlias = agentId !== null && entry?.agent === agentId;
+
+      let score = 0;
+      if (matchesWorkspace) {
+        score += 4;
+      }
+      if (matchesId) {
+        score += 2;
+      }
+      if (allowAgentAliasFallback && matchesAgentAlias) {
+        score += 1;
+      }
+
+      return {
+        entry,
+        score,
+        matchesWorkspace,
+        matchesId,
+        matchesAgentAlias
+      };
+    })
+    .filter((candidate) => {
+      if (candidate.matchesWorkspace || candidate.matchesId) {
+        return true;
+      }
+
+      return allowAgentAliasFallback && candidate.matchesAgentAlias;
+    })
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return compareIsoDateDescending(left.entry?.updatedAt, right.entry?.updatedAt);
+    });
+
+  return candidates[0]?.entry ?? null;
+}
+
+function toAgentItemWithGatewayStatus(entry, gatewayAgent) {
+  const item = toAgentItem(entry);
+  if (!gatewayAgent) {
+    return item;
+  }
+
+  return {
+    ...item,
+    status: normalizeAgentStatus(gatewayAgent.state ?? gatewayAgent.status),
+    updatedAt:
+      typeof gatewayAgent.updatedAt === "string" && gatewayAgent.updatedAt.trim().length > 0
+        ? gatewayAgent.updatedAt
+        : item.updatedAt
+  };
+}
+
 function findAgentEntry(agents, agentId) {
   return agents.find((entry) => entry?.agent === agentId) ?? null;
 }
@@ -153,9 +242,18 @@ async function listWorkspaceFilesRecursive(workspaceRoot, currentPath = workspac
 
 export async function handleAgentsListRead(res, _monitorProviders) {
   const agents = await loadLatestSessionRegistryEntries();
+  let gatewayAgents = [];
+
+  try {
+    gatewayAgents = loadGatewayAgents(_monitorProviders?.gateway ? await _monitorProviders.gateway() : null);
+  } catch {
+    gatewayAgents = [];
+  }
 
   sendJson(res, 200, {
-    items: agents.map((entry) => toAgentItem(entry))
+    items: agents.map((entry) =>
+      toAgentItemWithGatewayStatus(entry, findGatewayAgentMatch(entry, gatewayAgents, { allowAgentAliasFallback: false }))
+    )
   });
 }
 
@@ -177,11 +275,8 @@ export async function handleAgentStatusRead(res, _monitorProviders, agentId) {
 
   try {
     const gatewaySnapshot = _monitorProviders?.gateway ? await _monitorProviders.gateway() : null;
-    const gatewayAgents = Array.isArray(gatewaySnapshot?.snapshot?.agents)
-      ? gatewaySnapshot.snapshot.agents
-      : [];
-    const gatewayAgent =
-      gatewayAgents.find((entry) => entry?.id === agentId || entry?.agent === agentId) ?? null;
+    const gatewayAgents = loadGatewayAgents(gatewaySnapshot);
+    const gatewayAgent = findGatewayAgentMatch(agentEntry, gatewayAgents, { allowAgentAliasFallback: true });
 
     if (gatewayAgent) {
       status = normalizeAgentStatus(gatewayAgent.state ?? gatewayAgent.status);

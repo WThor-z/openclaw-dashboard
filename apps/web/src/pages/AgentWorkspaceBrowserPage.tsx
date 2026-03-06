@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../app/auth.js";
-import { Agent } from "../components/AgentCard.js";
+import { type Agent } from "../components/AgentCard.js";
+import { AgentWorkspaceSidebar } from "../components/AgentWorkspaceSidebar.js";
 import { EmptyState } from "../components/EmptyState.js";
 import { ErrorBoundary } from "../components/ErrorBoundary.js";
 import { FileTree, WorkspaceFile } from "../components/FileTree.js";
@@ -10,6 +11,7 @@ import { MarkdownEditor } from "../components/MarkdownEditor.js";
 import { MarkdownViewer } from "../components/MarkdownViewer.js";
 import { Skeleton } from "../components/Skeleton.js";
 import { useAgentStatus } from "../hooks/useAgentStatus.js";
+import { saveSelectedAgentId } from "../features/agent-workspace/storage.js";
 
 interface DaemonWorkspaceNode {
   name: string;
@@ -48,6 +50,7 @@ export function AgentWorkspaceBrowserPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const { token } = useAuth();
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [isAgentLoading, setIsAgentLoading] = useState(true);
@@ -65,7 +68,7 @@ export function AgentWorkspaceBrowserPage() {
   const agentStatus = useAgentStatus({
     agentId: agent?.id ?? null,
     token,
-    initialStatus: agent?.status ?? "offline"
+    initialStatus: agent?.status ?? "idle"
   });
 
   const loadFileContent = useCallback(
@@ -86,9 +89,7 @@ export function AgentWorkspaceBrowserPage() {
 
         const body = (await response.json()) as { content?: string; modifiedAt?: string };
         setSelectedFileContent(typeof body.content === "string" ? body.content : "");
-        setSelectedFileModifiedAt(
-          typeof body.modifiedAt === "string" && body.modifiedAt.length > 0 ? body.modifiedAt : null
-        );
+        setSelectedFileModifiedAt(typeof body.modifiedAt === "string" ? body.modifiedAt : null);
       } catch {
         setSelectedFileContent("");
         setSelectedFileModifiedAt(null);
@@ -126,10 +127,13 @@ export function AgentWorkspaceBrowserPage() {
         }
 
         const body = (await response.json()) as { items?: Agent[] };
-        const matchedAgent = (body.items ?? []).find((entry) => entry.id === agentId) ?? null;
         if (cancelled) {
           return;
         }
+
+        const nextAgents = Array.isArray(body.items) ? body.items : [];
+        const matchedAgent = nextAgents.find((entry) => entry.id === agentId) ?? null;
+        setAgents(nextAgents);
 
         if (!matchedAgent) {
           setAgent(null);
@@ -138,6 +142,7 @@ export function AgentWorkspaceBrowserPage() {
         }
 
         setAgent(matchedAgent);
+        saveSelectedAgentId(matchedAgent.id);
       } catch {
         if (!cancelled) {
           setAgent(null);
@@ -209,12 +214,13 @@ export function AgentWorkspaceBrowserPage() {
     return () => {
       isCancelled = true;
     };
-  }, [agent, token]);
+  }, [agent?.id, token]);
 
   const isEditableTextFile = useMemo(() => {
     if (selectedPathKind !== "file" || !selectedPath) {
       return false;
     }
+
     return /\.(md|txt)$/i.test(selectedPath);
   }, [selectedPath, selectedPathKind]);
 
@@ -251,21 +257,22 @@ export function AgentWorkspaceBrowserPage() {
   }, []);
 
   return (
-    <div className="flex h-screen w-full bg-zinc-950 text-zinc-200 font-mono overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden bg-zinc-950 font-mono text-zinc-200 selection:bg-indigo-500/30">
+      <AgentWorkspaceSidebar
+        agents={agents}
+        selectedAgent={agent}
+        activeSection="workspace"
+        onSelectAgent={(nextAgent) => {
+          saveSelectedAgentId(nextAgent.id);
+          navigate(`/agents/${encodeURIComponent(nextAgent.id)}/workspace`);
+        }}
+      />
+
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-900/30 backdrop-blur-md">
-          <div className="flex items-center gap-4 min-w-0">
-            <button
-              type="button"
-              onClick={() => navigate("/dashboard")}
-              className="px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            >
-              Back to Dashboard
-            </button>
-            <div className="min-w-0">
-              <h1 className="text-lg font-bold tracking-tight text-zinc-100">Full Workspace</h1>
-              {agent ? <p className="text-xs text-zinc-500 truncate">{agent.name}</p> : null}
-            </div>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold tracking-tight text-zinc-100">Full Workspace</h1>
+            {agent ? <p className="text-xs text-zinc-500 truncate">{agent.name}</p> : null}
           </div>
 
           {agent ? (

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Agent, AgentCard } from "./AgentCard.js";
 import { EmptyState } from "./EmptyState.js";
 import { Skeleton } from "./Skeleton.js";
@@ -14,6 +14,11 @@ export function AgentList({ onAgentClick, onAgentsChange }: AgentListProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const agentsRef = useRef<Agent[]>([]);
+
+  useEffect(() => {
+    agentsRef.current = agents;
+  }, [agents]);
 
   useEffect(() => {
     if (!token) {
@@ -38,10 +43,47 @@ export function AgentList({ onAgentClick, onAgentsChange }: AgentListProps) {
         if (!response.ok) {
           throw new Error("Failed to fetch agents");
         }
-        const data = await response.json();
-        const nextAgents = data.items || [];
-        setAgents(nextAgents);
-        onAgentsChange?.(nextAgents);
+        const data = (await response.json()) as { items?: Agent[] };
+        const nextAgents = Array.isArray(data.items) ? data.items : [];
+        const previousById = new Map(agentsRef.current.map((agent) => [agent.id, agent]));
+
+        const hydratedAgents = await Promise.all(
+          nextAgents.map(async (agent) => {
+            try {
+              const statusResponse = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/status`, {
+                headers: {
+                  authorization: `Bearer ${token ?? ""}`
+                }
+              });
+
+              if (!statusResponse.ok) {
+                throw new Error(`Failed to fetch status for ${agent.id}`);
+              }
+
+              const statusData = await statusResponse.json();
+              const nextStatus =
+                statusData.status === "idle" ||
+                statusData.status === "busy" ||
+                statusData.status === "offline" ||
+                statusData.status === "error"
+                  ? statusData.status
+                  : agent.status;
+
+              return {
+                ...agent,
+                status: nextStatus,
+                updatedAt: typeof statusData.updatedAt === "string" ? statusData.updatedAt : agent.updatedAt
+              } satisfies Agent;
+            } catch {
+              const previousAgent = previousById.get(agent.id);
+              return previousAgent ? { ...agent, status: previousAgent.status, updatedAt: previousAgent.updatedAt ?? agent.updatedAt } : agent;
+            }
+          })
+        );
+
+        agentsRef.current = hydratedAgents;
+        setAgents(hydratedAgents);
+        onAgentsChange?.(hydratedAgents);
         setError(null);
       } catch (err) {
         console.error("Error fetching agents:", err);

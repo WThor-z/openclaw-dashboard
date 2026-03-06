@@ -1,5 +1,7 @@
 # openclaw-dashboard
 
+Language: English | [简体中文](README.zh-CN.md)
+
 OpenClaw Dashboard is a local control-plane and Agent Workspace UI for OpenClaw-style
 agent environments. It pairs a Node daemon with a React frontend so you can log in,
 inspect agents, browse their workspace files, preview markdown and text output, and

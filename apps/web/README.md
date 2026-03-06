@@ -1,5 +1,7 @@
 # @apps/web
 
+Language: English | [简体中文](README.zh-CN.md)
+
 `@apps/web` is the frontend for OpenClaw Dashboard.
 It is a Vite + React application that provides the authenticated dashboard shell and
 the Agent Workspace experience at `/dashboard`.

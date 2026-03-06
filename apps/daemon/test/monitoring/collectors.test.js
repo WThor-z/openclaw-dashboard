@@ -3,14 +3,28 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMonitorProviders } from "../../src/monitoring/collectors.js";
+import { createMonitorProviders, createMonitorProvidersFromEnv } from "../../src/monitoring/collectors.js";
 
 const temporaryDirectories = [];
+const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 
 afterEach(async () => {
   while (temporaryDirectories.length > 0) {
     const dirPath = temporaryDirectories.pop();
     await rm(dirPath, { recursive: true, force: true });
+  }
+
+  if (ORIGINAL_HOME === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = ORIGINAL_HOME;
+  }
+
+  if (ORIGINAL_USERPROFILE === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = ORIGINAL_USERPROFILE;
   }
 });
 
@@ -133,5 +147,115 @@ describe("monitor collectors", () => {
       workspace: "/workspace/a",
       state: "running"
     });
+  });
+
+  it("falls back to configured agents when only legacy config exists", async () => {
+    const baseDir = await mkdtemp(path.join(os.tmpdir(), "monitoring-openclaw-config-"));
+    temporaryDirectories.push(baseDir);
+
+    const legacyStateDir = path.join(baseDir, ".clawdbot");
+    await mkdir(legacyStateDir, { recursive: true });
+    await writeFile(
+      path.join(legacyStateDir, "clawdbot.json"),
+      JSON.stringify(
+        {
+          agents: {
+            list: [
+              { id: "main", workspace: "~/workspace-main" },
+              { id: "reviewer", workspace: "~/workspace-reviewer" }
+            ]
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const providers = createMonitorProviders({
+      workspaceRoots: [],
+      openclawRoot: legacyStateDir,
+      now: () => new Date("2026-03-05T12:00:00.000Z")
+    });
+
+    const snapshot = await providers.gateway();
+
+    expect(snapshot.snapshot).toMatchObject({
+      status: "idle",
+      registryExists: false,
+      activeAgentCount: 0,
+      totalEntryCount: 2,
+      parseError: "session registry file is missing"
+    });
+    expect(snapshot.snapshot.agents).toEqual([
+      {
+        id: "main",
+        agent: "main",
+        workspace: "~/workspace-main",
+        state: "offline",
+        updatedAt: null
+      },
+      {
+        id: "reviewer",
+        agent: "reviewer",
+        workspace: "~/workspace-reviewer",
+        state: "offline",
+        updatedAt: null
+      }
+    ]);
+  });
+
+  it("resolves legacy-only env roots instead of anchoring to the first candidate", async () => {
+    const baseDir = await mkdtemp(path.join(os.tmpdir(), "monitoring-openclaw-env-config-"));
+    temporaryDirectories.push(baseDir);
+
+    const legacyStateDir = path.join(baseDir, ".clawdbot");
+    await mkdir(legacyStateDir, { recursive: true });
+    await writeFile(
+      path.join(legacyStateDir, "clawdbot.json"),
+      JSON.stringify(
+        {
+          routing: {
+            agents: {
+              main: { workspace: "~/workspace-main" },
+              reviewer: { workspace: "~/workspace-reviewer" }
+            }
+          }
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    process.env.HOME = baseDir;
+    process.env.USERPROFILE = baseDir;
+
+    const providers = createMonitorProvidersFromEnv(process.env);
+    const snapshot = await providers.gateway();
+
+    expect(snapshot.snapshot).toMatchObject({
+      status: "idle",
+      registryExists: false,
+      activeAgentCount: 0,
+      totalEntryCount: 2,
+      parseError: "session registry file is missing"
+    });
+    expect(snapshot.snapshot.agents).toEqual([
+      {
+        id: "main",
+        agent: "main",
+        workspace: "~/workspace-main",
+        state: "offline",
+        updatedAt: null
+      },
+      {
+        id: "reviewer",
+        agent: "reviewer",
+        workspace: "~/workspace-reviewer",
+        state: "offline",
+        updatedAt: null
+      }
+    ]);
   });
 });

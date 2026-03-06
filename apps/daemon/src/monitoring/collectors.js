@@ -2,6 +2,11 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { HttpError } from "../middleware/error-handler.js";
+import {
+  loadLatestSessionRegistryEntries,
+  resolvePreferredStateDir,
+  resolveStateDirCandidates
+} from "../openclaw/session-registry.js";
 
 const WORKSPACE_FAILURE_MARKERS = new Set(["error.log", "crash.log", "errors.json"]);
 const OPENCLAW_SESSION_REGISTRY_PATH = path.join("state", "session-registry.json");
@@ -231,10 +236,15 @@ function normalizeGatewayAgentEntry(entry) {
   };
 }
 
-async function collectGatewaySnapshot({ openclawRoot, now }) {
+async function collectGatewaySnapshot({ openclawRoot, openclawEnv, openclawRootExplicit, now }) {
   const collectedAt = now().toISOString();
 
-  if (typeof openclawRoot !== "string" || openclawRoot.length === 0) {
+  const resolvedOpenclawRoot =
+    typeof openclawRoot === "string" && openclawRoot.length > 0
+      ? openclawRoot
+      : await resolvePreferredStateDir(openclawEnv ?? process.env);
+
+  if (typeof resolvedOpenclawRoot !== "string" || resolvedOpenclawRoot.length === 0) {
     return {
       snapshot: {
         status: "not_configured",
@@ -247,7 +257,7 @@ async function collectGatewaySnapshot({ openclawRoot, now }) {
     };
   }
 
-  const canonicalRoot = await canonicalizePath(openclawRoot);
+  const canonicalRoot = await canonicalizePath(resolvedOpenclawRoot);
   if (!canonicalRoot) {
     return {
       snapshot: {
@@ -263,38 +273,66 @@ async function collectGatewaySnapshot({ openclawRoot, now }) {
   }
 
   const registryPath = path.join(canonicalRoot, OPENCLAW_SESSION_REGISTRY_PATH);
+
+  async function buildConfiguredFallbackSnapshot(parseError) {
+    const fallbackEnv = openclawRootExplicit
+      ? {
+        ...(openclawEnv ?? process.env),
+        DAEMON_MONITOR_OPENCLAW_ROOT: canonicalRoot
+      }
+      : (openclawEnv ?? process.env);
+    const configuredEntries = await loadLatestSessionRegistryEntries({
+      env: fallbackEnv
+    });
+
+    if (configuredEntries.length === 0) {
+      return {
+        snapshot: {
+          status: "degraded",
+          registryExists: false,
+          activeAgentCount: 0,
+          totalEntryCount: 0,
+          agents: [],
+          parseError,
+          collectedAt
+        }
+      };
+    }
+
+    const configuredAgents = configuredEntries.map((entry) => ({
+      id: entry.agent,
+      agent: entry.agent,
+      workspace: entry.workspacePath ?? "unknown-workspace",
+      state: entry.status ?? "offline",
+      updatedAt: entry.updatedAt ?? null
+    }));
+    const activeAgentCount = configuredAgents.filter((entry) => RUNNING_STATE_MARKERS.has(entry.state)).length;
+
+    return {
+      snapshot: {
+        status: activeAgentCount > 0 ? "ok" : "idle",
+        registryExists: false,
+        activeAgentCount,
+        totalEntryCount: configuredAgents.length,
+        agents: configuredAgents,
+        parseError,
+        collectedAt
+      }
+    };
+  }
+
   let registryRaw;
   try {
     registryRaw = await readFile(registryPath, "utf8");
   } catch {
-    return {
-      snapshot: {
-        status: "degraded",
-        registryExists: false,
-        activeAgentCount: 0,
-        totalEntryCount: 0,
-        agents: [],
-        parseError: "session registry file is missing",
-        collectedAt
-      }
-    };
+    return buildConfiguredFallbackSnapshot("session registry file is missing");
   }
 
   let registryJson;
   try {
     registryJson = JSON.parse(registryRaw);
   } catch {
-    return {
-      snapshot: {
-        status: "degraded",
-        registryExists: true,
-        activeAgentCount: 0,
-        totalEntryCount: 0,
-        agents: [],
-        parseError: "session registry file is not valid JSON",
-        collectedAt
-      }
-    };
+    return buildConfiguredFallbackSnapshot("session registry file is not valid JSON");
   }
 
   const entries = extractRegistryEntries(registryJson);
@@ -487,8 +525,13 @@ async function collectWorkspaceSnapshot({
   };
 }
 
-async function collectOpenclawSnapshot({ openclawRoot, now }) {
-  if (typeof openclawRoot !== "string" || openclawRoot.length === 0) {
+async function collectOpenclawSnapshot({ openclawRoot, openclawEnv, now }) {
+  const resolvedOpenclawRoot =
+    typeof openclawRoot === "string" && openclawRoot.length > 0
+      ? openclawRoot
+      : await resolvePreferredStateDir(openclawEnv ?? process.env);
+
+  if (typeof resolvedOpenclawRoot !== "string" || resolvedOpenclawRoot.length === 0) {
     return {
       snapshot: {
         status: "not_configured",
@@ -502,7 +545,7 @@ async function collectOpenclawSnapshot({ openclawRoot, now }) {
     };
   }
 
-  const canonicalRoot = await canonicalizePath(openclawRoot);
+  const canonicalRoot = await canonicalizePath(resolvedOpenclawRoot);
   let directoryExists = false;
   if (canonicalRoot) {
     try {
@@ -539,6 +582,8 @@ async function collectOpenclawSnapshot({ openclawRoot, now }) {
 export function createMonitorProviders({
   workspaceRoots = [],
   openclawRoot = null,
+  openclawEnv = process.env,
+  openclawRootExplicit = true,
   hotWindowMinutes = DEFAULT_HOT_WINDOW_MINUTES,
   hotFilesLimit = DEFAULT_HOT_FILES_LIMIT,
   now = () => new Date()
@@ -554,10 +599,10 @@ export function createMonitorProviders({
       });
     },
     async openclaw() {
-      return collectOpenclawSnapshot({ openclawRoot, now });
+      return collectOpenclawSnapshot({ openclawRoot, openclawEnv, now });
     },
     async gateway() {
-      return collectGatewaySnapshot({ openclawRoot, now });
+      return collectGatewaySnapshot({ openclawRoot, openclawEnv, openclawRootExplicit, now });
     }
   };
 }
@@ -567,9 +612,15 @@ export function createMonitorProvidersFromEnv(env = process.env) {
     .split(path.delimiter)
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+  const openclawRootExplicit = [env.OPENCLAW_STATE_DIR, env.CLAWDBOT_STATE_DIR, env.DAEMON_MONITOR_OPENCLAW_ROOT].some(
+    (value) => typeof value === "string" && value.trim().length > 0
+  );
+  const [resolvedOpenclawRoot] = openclawRootExplicit ? resolveStateDirCandidates(env) : [];
 
   return createMonitorProviders({
     workspaceRoots,
-    openclawRoot: env.DAEMON_MONITOR_OPENCLAW_ROOT ?? null
+    openclawRoot: resolvedOpenclawRoot ?? null,
+    openclawEnv: env,
+    openclawRootExplicit
   });
 }

@@ -303,7 +303,7 @@ async function collectGatewaySnapshot({ openclawRoot, openclawEnv, openclawRootE
       id: entry.agent,
       agent: entry.agent,
       workspace: entry.workspacePath ?? "unknown-workspace",
-      state: entry.status ?? "offline",
+      state: entry.status ?? "idle",
       updatedAt: entry.updatedAt ?? null
     }));
     const activeAgentCount = configuredAgents.filter((entry) => RUNNING_STATE_MARKERS.has(entry.state)).length;

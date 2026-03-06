@@ -339,7 +339,7 @@ describe("read agent APIs", () => {
         name: "Main Agent",
         role: "worker",
         workspacePath: "~/workspace-main",
-        status: "offline",
+        status: "idle",
         updatedAt: null
       },
       {
@@ -347,10 +347,35 @@ describe("read agent APIs", () => {
         name: "Reviewer",
         role: "worker",
         workspacePath: "~/workspace-reviewer",
-        status: "offline",
+        status: "idle",
         updatedAt: null
       }
     ]);
+  });
+
+  it("does not mark configured fallback agents offline when no live session registry exists", async () => {
+    const repositories = createFixtureRepositories();
+    await createLegacyConfigFixture();
+    const monitorProviders = {
+      async gateway() {
+        return {
+          snapshot: {
+            agents: []
+          }
+        };
+      }
+    };
+    const server = await startServer({ repositories, monitorProviders });
+    const baseUrl = endpointFrom(server.address());
+
+    const statusResponse = await authorizedGet(`${baseUrl}/api/agents/main/status`);
+    const statusBody = await statusResponse.json();
+
+    expect(statusResponse.status).toBe(200);
+    expect(statusBody).toEqual({
+      status: "idle",
+      updatedAt: expect.any(String)
+    });
   });
 
   it("uses gateway workspace matches to override configured offline statuses", async () => {

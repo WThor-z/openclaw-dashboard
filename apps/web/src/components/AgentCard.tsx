@@ -3,9 +3,10 @@ import React from "react";
 export interface Agent {
   id: string;
   name: string;
+  role: string;
+  workspacePath: string;
   status: "idle" | "busy" | "offline" | "error";
-  type: string;
-  lastActive?: string;
+  updatedAt?: string;
 }
 
 interface AgentCardProps {
@@ -44,7 +45,7 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
           </div>
           <div>
             <h4 className="font-bold text-zinc-100 group-hover:text-white transition-colors">{agent.name}</h4>
-            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{agent.type}</span>
+            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{agent.role}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -58,10 +59,10 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
           <span className="text-zinc-500">ID</span>
           <span className="text-zinc-300 font-mono">{agent.id.slice(0, 8)}...</span>
         </div>
-        {agent.lastActive && (
+        {agent.updatedAt && (
           <div className="flex items-center justify-between text-xs">
             <span className="text-zinc-500">Last Active</span>
-            <span className="text-zinc-300">{agent.lastActive}</span>
+            <span className="text-zinc-300">{agent.updatedAt}</span>
           </div>
         )}
       </div>

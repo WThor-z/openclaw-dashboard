@@ -192,14 +192,14 @@ describe("monitor collectors", () => {
         id: "main",
         agent: "main",
         workspace: "~/workspace-main",
-        state: "offline",
+        state: "idle",
         updatedAt: null
       },
       {
         id: "reviewer",
         agent: "reviewer",
         workspace: "~/workspace-reviewer",
-        state: "offline",
+        state: "idle",
         updatedAt: null
       }
     ]);
@@ -246,14 +246,14 @@ describe("monitor collectors", () => {
         id: "main",
         agent: "main",
         workspace: "~/workspace-main",
-        state: "offline",
+        state: "idle",
         updatedAt: null
       },
       {
         id: "reviewer",
         agent: "reviewer",
         workspace: "~/workspace-reviewer",
-        state: "offline",
+        state: "idle",
         updatedAt: null
       }
     ]);

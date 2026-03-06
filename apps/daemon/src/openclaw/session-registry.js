@@ -338,7 +338,7 @@ function normalizeConfiguredAgentEntry(entry, defaults, stateDir = null) {
     name: pickStringByPaths(entry, [["name"], ["identity", "name"]]) ?? agent,
     stateDir,
     workspacePath,
-    status: "offline",
+    status: "idle",
     updatedAt: null
   };
 }
@@ -411,7 +411,7 @@ async function loadConfiguredAgentEntries({ env = process.env } = {}) {
           name: "main",
           stateDir,
           workspacePath: defaultWorkspace,
-          status: "offline",
+          status: "idle",
           updatedAt: null
         }
       ];

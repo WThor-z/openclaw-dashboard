@@ -15,8 +15,14 @@ type UseAgentStatusParams = {
 export function useAgentStatus({ agentId, token, initialStatus }: UseAgentStatusParams) {
   const [status, setStatus] = useState<AgentStatus>(initialStatus);
   const consecutiveFailuresRef = useRef(0);
+  const lastAgentIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (lastAgentIdRef.current === agentId) {
+      return;
+    }
+
+    lastAgentIdRef.current = agentId;
     setStatus(initialStatus);
     consecutiveFailuresRef.current = 0;
   }, [agentId, initialStatus]);

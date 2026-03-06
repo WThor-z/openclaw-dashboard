@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 const SESSION_REGISTRY_RELATIVE_PATH = path.join("state", "session-registry.json");
+const CONFIG_FILENAME_CANDIDATES = ["openclaw.json", "clawdbot.json", "moltbot.json", "moldbot.json"];
+const STATE_DIRNAME_CANDIDATES = [".openclaw", ".clawdbot", ".moltbot", ".moldbot"];
 const REGISTRY_COLLECTION_KEYS = [
   "sessions",
   "activeSessions",
@@ -31,6 +34,144 @@ function isObjectRecord(value) {
 
 function toNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveHomeDirectory(env) {
+  return (
+    toNonEmptyString(env?.HOME) ??
+    toNonEmptyString(env?.USERPROFILE) ??
+    toNonEmptyString(os.homedir()) ??
+    null
+  );
+}
+
+function resolveUserPath(input, env) {
+  const value = toNonEmptyString(input);
+  if (!value) {
+    return null;
+  }
+
+  if (value.startsWith("~")) {
+    const homeDirectory = resolveHomeDirectory(env);
+    if (!homeDirectory) {
+      return path.resolve(value);
+    }
+
+    return path.resolve(value.replace(/^~(?=$|[\\/])/, homeDirectory));
+  }
+
+  return path.resolve(value);
+}
+
+function resolveTildePath(input, env) {
+  const value = toNonEmptyString(input);
+  if (!value) {
+    return null;
+  }
+
+  if (!value.startsWith("~")) {
+    return null;
+  }
+
+  const homeDirectory = resolveHomeDirectory(env);
+  if (!homeDirectory) {
+    return path.resolve(value);
+  }
+
+  return path.resolve(value.replace(/^~(?=$|[\\/])/, homeDirectory));
+}
+
+function uniquePaths(paths) {
+  return [...new Set(paths.filter((entry) => typeof entry === "string" && entry.length > 0))];
+}
+
+async function pathExists(targetPath) {
+  try {
+    await readFile(targetPath, "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveStateDirCandidates(env = process.env) {
+  const explicitStateDir =
+    resolveUserPath(env.OPENCLAW_STATE_DIR, env) ??
+    resolveUserPath(env.CLAWDBOT_STATE_DIR, env) ??
+    resolveUserPath(env.DAEMON_MONITOR_OPENCLAW_ROOT, env);
+
+  if (explicitStateDir) {
+    return uniquePaths([explicitStateDir]);
+  }
+
+  const homeDirectory = resolveHomeDirectory(env);
+  if (!homeDirectory) {
+    return [];
+  }
+
+  return uniquePaths(STATE_DIRNAME_CANDIDATES.map((dirname) => path.join(homeDirectory, dirname)));
+}
+
+export function resolveConfigCandidates(env = process.env) {
+  const explicitConfigPath =
+    resolveUserPath(env.OPENCLAW_CONFIG_PATH, env) ?? resolveUserPath(env.CLAWDBOT_CONFIG_PATH, env);
+  if (explicitConfigPath) {
+    return [explicitConfigPath];
+  }
+
+  const stateDirCandidates = resolveStateDirCandidates(env);
+  const candidates = [];
+  for (const stateDir of stateDirCandidates) {
+    for (const filename of CONFIG_FILENAME_CANDIDATES) {
+      candidates.push(path.join(stateDir, filename));
+    }
+  }
+
+  return uniquePaths(candidates);
+}
+
+export async function resolvePreferredStateDir(env = process.env) {
+  const explicitStateDir =
+    resolveUserPath(env.OPENCLAW_STATE_DIR, env) ??
+    resolveUserPath(env.CLAWDBOT_STATE_DIR, env) ??
+    resolveUserPath(env.DAEMON_MONITOR_OPENCLAW_ROOT, env);
+  if (explicitStateDir) {
+    return explicitStateDir;
+  }
+
+  const stateDirCandidates = resolveStateDirCandidates(env);
+  for (const stateDir of stateDirCandidates) {
+    const registryPath = path.join(stateDir, SESSION_REGISTRY_RELATIVE_PATH);
+    if (await pathExists(registryPath)) {
+      return stateDir;
+    }
+
+    for (const configPath of CONFIG_FILENAME_CANDIDATES.map((filename) => path.join(stateDir, filename))) {
+      if (await pathExists(configPath)) {
+        return stateDir;
+      }
+    }
+  }
+
+  return stateDirCandidates[0] ?? null;
+}
+
+function stripJsonComments(input) {
+  return input
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+}
+
+function stripTrailingCommas(input) {
+  return input.replace(/,\s*([}\]])/g, "$1");
+}
+
+function parseConfigLikeJson(rawValue) {
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    return JSON.parse(stripTrailingCommas(stripJsonComments(rawValue)));
+  }
 }
 
 function readByPath(target, pathParts) {
@@ -114,7 +255,7 @@ function compareUpdatedAt(candidateUpdatedAt, currentUpdatedAt) {
   return 0;
 }
 
-function normalizeRegistryEntry(entry) {
+function normalizeRegistryEntry(entry, stateDir = null) {
   const agent = pickStringByPaths(entry, [
     ["agent"],
     ["agentId"],
@@ -146,9 +287,12 @@ function normalizeRegistryEntry(entry) {
     ["createdAt"],
     ["created_at"]
   ]);
+  const name = pickStringByPaths(entry, [["name"], ["identity", "name"]]);
 
   return {
     agent,
+    name,
+    stateDir,
     workspacePath,
     status: normalizeAgentStatus(
       pickStringByPaths(entry, [["status"], ["state"], ["phase"], ["connection"], ["lifecycle"]])
@@ -179,41 +323,143 @@ export function normalizeAgentStatus(rawStatus) {
   return "idle";
 }
 
-export async function loadLatestSessionRegistryEntries({ env = process.env } = {}) {
-  const openclawRoot = toNonEmptyString(env.DAEMON_MONITOR_OPENCLAW_ROOT);
-  if (!openclawRoot) {
+function normalizeConfiguredAgentEntry(entry, defaults, stateDir = null) {
+  const agent = pickStringByPaths(entry, [["id"], ["agent"], ["agentId"], ["name"]]);
+  if (!agent) {
+    return null;
+  }
+
+  const workspacePath =
+    pickStringByPaths(entry, [["workspace"], ["workspacePath"], ["cwd"], ["workingDirectory"]]) ??
+    pickStringByPaths(defaults, [["workspace"], ["workspacePath"], ["cwd"], ["workingDirectory"]]);
+
+  return {
+    agent,
+    name: pickStringByPaths(entry, [["name"], ["identity", "name"]]) ?? agent,
+    stateDir,
+    workspacePath,
+    status: "offline",
+    updatedAt: null
+  };
+}
+
+function normalizeLegacyRoutedAgentEntries(routingAgents, defaults, stateDir = null) {
+  if (!isObjectRecord(routingAgents)) {
     return [];
   }
 
-  const registryPath = path.join(openclawRoot, SESSION_REGISTRY_RELATIVE_PATH);
+  return Object.entries(routingAgents)
+    .map(([agentId, value]) => {
+      if (!isObjectRecord(value)) {
+        return null;
+      }
 
-  let rawRegistry;
-  try {
-    rawRegistry = await readFile(registryPath, "utf8");
-  } catch {
-    return [];
-  }
-
-  let registryJson;
-  try {
-    registryJson = JSON.parse(rawRegistry);
-  } catch {
-    return [];
-  }
-
-  const normalizedEntries = extractRegistryEntries(registryJson)
-    .map((entry) => normalizeRegistryEntry(entry))
+      return normalizeConfiguredAgentEntry(
+        {
+          id: agentId,
+          ...value
+        },
+        defaults,
+        stateDir
+      );
+    })
     .filter((entry) => entry !== null);
-  const latestByAgent = new Map();
+}
 
-  for (const entry of normalizedEntries) {
-    const current = latestByAgent.get(entry.agent);
-    if (!current || compareUpdatedAt(entry.updatedAt, current.updatedAt) > 0) {
-      latestByAgent.set(entry.agent, entry);
+async function loadConfiguredAgentEntries({ env = process.env } = {}) {
+  const configCandidates = resolveConfigCandidates(env);
+
+  for (const configPath of configCandidates) {
+    let rawConfig;
+    try {
+      rawConfig = await readFile(configPath, "utf8");
+    } catch {
+      continue;
+    }
+
+    let configJson;
+    try {
+      configJson = parseConfigLikeJson(rawConfig);
+    } catch {
+      continue;
+    }
+
+    const defaults = isObjectRecord(configJson?.agents?.defaults) ? configJson.agents.defaults : null;
+    const configuredList = Array.isArray(configJson?.agents?.list) ? configJson.agents.list : [];
+    const stateDir = path.dirname(configPath);
+    const normalizedAgents = configuredList
+      .map((entry) => normalizeConfiguredAgentEntry(entry, defaults, stateDir))
+      .filter((entry) => entry !== null);
+
+    const legacyRoutedAgents = normalizeLegacyRoutedAgentEntries(configJson?.routing?.agents, defaults, stateDir);
+    const discoveredAgents = normalizedAgents.length > 0 ? normalizedAgents : legacyRoutedAgents;
+
+    if (discoveredAgents.length > 0) {
+      return discoveredAgents;
+    }
+
+    const defaultWorkspace = pickStringByPaths(defaults, [
+      ["workspace"],
+      ["workspacePath"],
+      ["cwd"],
+      ["workingDirectory"]
+    ]);
+    if (defaultWorkspace) {
+      return [
+        {
+          agent: "main",
+          name: "main",
+          stateDir,
+          workspacePath: defaultWorkspace,
+          status: "offline",
+          updatedAt: null
+        }
+      ];
     }
   }
 
-  return [...latestByAgent.values()];
+  return [];
+}
+
+export async function loadLatestSessionRegistryEntries({ env = process.env } = {}) {
+  const stateDirCandidates = resolveStateDirCandidates(env);
+
+  for (const stateDir of stateDirCandidates) {
+    const registryPath = path.join(stateDir, SESSION_REGISTRY_RELATIVE_PATH);
+
+    let rawRegistry;
+    try {
+      rawRegistry = await readFile(registryPath, "utf8");
+    } catch {
+      continue;
+    }
+
+    let registryJson;
+    try {
+      registryJson = JSON.parse(rawRegistry);
+    } catch {
+      continue;
+    }
+
+    const normalizedEntries = extractRegistryEntries(registryJson)
+      .map((entry) => normalizeRegistryEntry(entry, stateDir))
+      .filter((entry) => entry !== null);
+    const latestByAgent = new Map();
+
+    for (const entry of normalizedEntries) {
+      const current = latestByAgent.get(entry.agent);
+      if (!current || compareUpdatedAt(entry.updatedAt, current.updatedAt) > 0) {
+        latestByAgent.set(entry.agent, entry);
+      }
+    }
+
+    const latestEntries = [...latestByAgent.values()];
+    if (latestEntries.length > 0) {
+      return latestEntries;
+    }
+  }
+
+  return loadConfiguredAgentEntries({ env });
 }
 
 export function resolveRegistryWorkspacePath(entry, { env = process.env } = {}) {
@@ -226,10 +472,15 @@ export function resolveRegistryWorkspacePath(entry, { env = process.env } = {}) 
     return path.resolve(workspacePath);
   }
 
-  const openclawRoot = toNonEmptyString(env.DAEMON_MONITOR_OPENCLAW_ROOT);
-  if (!openclawRoot) {
+  const tildeWorkspacePath = resolveTildePath(workspacePath, env);
+  if (tildeWorkspacePath) {
+    return tildeWorkspacePath;
+  }
+
+  const stateDir = toNonEmptyString(entry?.stateDir) ?? resolveStateDirCandidates(env)[0] ?? null;
+  if (!stateDir) {
     return null;
   }
 
-  return path.resolve(openclawRoot, workspacePath);
+  return path.resolve(stateDir, workspacePath);
 }

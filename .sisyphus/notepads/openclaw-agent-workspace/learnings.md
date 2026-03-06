@@ -30,3 +30,6 @@ NodeNext requires explicit .js extensions for relative imports in TypeScript fil
 
 - Web Agent UI now consumes  contract fields (, , ) and AgentList sends  when requesting agents.
 - Agent card/workspace identity now use role instead of type, updatedAt instead of lastActive, and AgentList fetches /api/agents with Bearer auth from useAuth token.
+- OpenClaw agent discovery must resolve both modern and legacy state/config locations (`.openclaw`, `.clawdbot`, and legacy `clawdbot.json`) because some real installs have no `~/.openclaw` directory at all.
+- The agent config fallback must support both `agents.list[]` and legacy `routing.agents` shapes; otherwise migrated gateways can still render an empty dashboard.
+- `AgentWorkspacePage` utility classes only render correctly once Tailwind/PostCSS is wired into `apps/web`; the existing design-system CSS alone does not cover those utility class names.

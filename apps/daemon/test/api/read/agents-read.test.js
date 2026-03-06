@@ -12,6 +12,8 @@ const activeServers = [];
 const openDatabases = [];
 const temporaryDirectories = [];
 const READ_TOKEN = "dev-token";
+const ORIGINAL_HOME = process.env.HOME;
+const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
 
 afterEach(async () => {
   while (activeServers.length > 0) {
@@ -30,6 +32,16 @@ afterEach(async () => {
   }
 
   delete process.env.DAEMON_MONITOR_OPENCLAW_ROOT;
+  if (ORIGINAL_HOME === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = ORIGINAL_HOME;
+  }
+  if (ORIGINAL_USERPROFILE === undefined) {
+    delete process.env.USERPROFILE;
+  } else {
+    process.env.USERPROFILE = ORIGINAL_USERPROFILE;
+  }
 });
 
 function endpointFrom(address) {
@@ -118,6 +130,76 @@ async function createRegistryFixture() {
 
   process.env.DAEMON_MONITOR_OPENCLAW_ROOT = openclawRoot;
   return { openclawRoot, relativeWorkspace };
+}
+
+async function createLegacyConfigFixture() {
+  const baseDir = await mkdtemp(path.join(os.tmpdir(), "daemon-read-agents-config-"));
+  temporaryDirectories.push(baseDir);
+
+  const legacyStateDir = path.join(baseDir, ".clawdbot");
+  await mkdir(legacyStateDir, { recursive: true });
+  await writeFile(
+    path.join(legacyStateDir, "clawdbot.json"),
+    JSON.stringify(
+      {
+        agents: {
+          defaults: {
+            workspace: "~/workspace-main"
+          }
+        },
+        routing: {
+          agents: {
+            main: {
+              name: "Main Agent",
+              workspace: "~/workspace-main"
+            },
+            reviewer: {
+              name: "Reviewer",
+              workspace: "~/workspace-reviewer"
+            }
+          }
+        }
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  process.env.HOME = baseDir;
+  process.env.USERPROFILE = baseDir;
+}
+
+async function createRelativeLegacyConfigFixture() {
+  const baseDir = await mkdtemp(path.join(os.tmpdir(), "daemon-read-agents-relative-config-"));
+  temporaryDirectories.push(baseDir);
+
+  const legacyStateDir = path.join(baseDir, ".clawdbot");
+  const relativeWorkspace = path.join(legacyStateDir, "workspaces", "relative-main");
+  await mkdir(relativeWorkspace, { recursive: true });
+  await writeFile(path.join(relativeWorkspace, "summary.md"), "# relative\n", "utf8");
+  await writeFile(
+    path.join(legacyStateDir, "clawdbot.json"),
+    JSON.stringify(
+      {
+        routing: {
+          agents: {
+            main: {
+              name: "Main Agent",
+              workspace: "workspaces/relative-main"
+            }
+          }
+        }
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  process.env.HOME = baseDir;
+  process.env.USERPROFILE = baseDir;
+  return { relativeWorkspace };
 }
 
 describe("read agent APIs", () => {
@@ -240,6 +322,36 @@ describe("read agent APIs", () => {
     expect(statusBody.message).toBe("Agent not found");
   });
 
+  it("falls back to configured agents when session registry is missing", async () => {
+    const repositories = createFixtureRepositories();
+    await createLegacyConfigFixture();
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    const agentsResponse = await authorizedGet(`${baseUrl}/api/agents`);
+    const agentsBody = await agentsResponse.json();
+
+    expect(agentsResponse.status).toBe(200);
+    expect(agentsBody.items).toEqual([
+      {
+        id: "main",
+        name: "Main Agent",
+        role: "worker",
+        workspacePath: "~/workspace-main",
+        status: "offline",
+        updatedAt: null
+      },
+      {
+        id: "reviewer",
+        name: "Reviewer",
+        role: "worker",
+        workspacePath: "~/workspace-reviewer",
+        status: "offline",
+        updatedAt: null
+      }
+    ]);
+  });
+
   it("lists files for completed agents whose workspacePath is relative", async () => {
     const repositories = createFixtureRepositories();
     const { relativeWorkspace } = await createRegistryFixture();
@@ -261,6 +373,34 @@ describe("read agent APIs", () => {
     );
 
     const fileResponse = await authorizedGet(`${baseUrl}/api/agents/agent-beta/files/summary.md`);
+    const fileBody = await fileResponse.json();
+    const fileContents = await readFile(path.join(relativeWorkspace, "summary.md"), "utf8");
+
+    expect(fileResponse.status).toBe(200);
+    expect(fileBody.content).toBe(fileContents);
+  });
+
+  it("resolves relative configured workspaces against the source config directory", async () => {
+    const repositories = createFixtureRepositories();
+    const { relativeWorkspace } = await createRelativeLegacyConfigFixture();
+    const server = await startServer({ repositories });
+    const baseUrl = endpointFrom(server.address());
+
+    const filesResponse = await authorizedGet(`${baseUrl}/api/agents/main/files`);
+    const filesBody = await filesResponse.json();
+
+    expect(filesResponse.status).toBe(200);
+    expect(filesBody.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "summary.md",
+          name: "summary.md",
+          isDirectory: false
+        })
+      ])
+    );
+
+    const fileResponse = await authorizedGet(`${baseUrl}/api/agents/main/files/summary.md`);
     const fileBody = await fileResponse.json();
     const fileContents = await readFile(path.join(relativeWorkspace, "summary.md"), "utf8");
 

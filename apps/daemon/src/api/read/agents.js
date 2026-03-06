@@ -13,6 +13,7 @@ const ALLOWED_FILE_EXTENSIONS = new Set([".md", ".txt", ".json", ".yaml", ".yml"
 
 function toAgentItem(entry) {
   const id = typeof entry?.agent === "string" && entry.agent.trim().length > 0 ? entry.agent : "unknown-agent";
+  const name = typeof entry?.name === "string" && entry.name.trim().length > 0 ? entry.name.trim() : id;
   const workspacePath =
     typeof entry?.workspacePath === "string" && entry.workspacePath.trim().length > 0
       ? entry.workspacePath
@@ -22,7 +23,7 @@ function toAgentItem(entry) {
 
   const item = {
     id,
-    name: id,
+    name,
     role: "worker",
     workspacePath,
     status: normalizeAgentStatus(entry?.status),

@@ -166,7 +166,7 @@ describe("read APIs", () => {
     const openclawResponse = await authorizedGet(`${baseUrl}/api/monitors/openclaw`);
     const openclawBody = await openclawResponse.json();
     expect(openclawResponse.status).toBe(200);
-    expect(openclawBody.snapshot).toMatchObject({ status: "not_configured" });
+    expect(openclawBody.snapshot).toMatchObject({ status: "degraded" });
   });
 
   it("rejects unbounded event limit", async () => {

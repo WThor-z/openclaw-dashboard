@@ -8,6 +8,7 @@ const SCREENSHOT_PATH = path.join(
   "openclaw-agent-workspace",
   "task-11-agent-workspace.png"
 );
+const LOGIN_TOKEN = process.env.E2E_LOGIN_TOKEN ?? "dev-token";
 
 test("opens agent workspace and saves README.md", async ({ page }) => {
   let fileContent = "# README\n\nInitial content.";
@@ -102,7 +103,7 @@ test("opens agent workspace and saves README.md", async ({ page }) => {
   });
 
   await page.goto("/login");
-  await page.getByTestId("daemon-token-input").fill("dev-token");
+  await page.getByTestId("daemon-token-input").fill(LOGIN_TOKEN);
   await page.getByTestId("connect-button").click();
 
   await expect(page).toHaveURL(/\/dashboard$/);

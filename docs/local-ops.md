@@ -41,3 +41,12 @@
 - Use a local tunnel or reverse proxy with authenticated access controls.
 - Do not expose daemon directly on `0.0.0.0` without compensating controls.
 - Re-run `pnpm verify:security` after remote access changes.
+
+## E2E Against SSH Forwarded UI
+
+- If you are testing a server-hosted stack via SSH forwarding (for example `http://127.0.0.1:13001`), run Playwright against the external endpoint instead of auto-starting a local web server.
+- Use environment variables:
+  - `PLAYWRIGHT_EXTERNAL_BASE_URL=http://127.0.0.1:13001`
+  - `E2E_LOGIN_TOKEN=<your-token>`
+- Example:
+  - `PLAYWRIGHT_EXTERNAL_BASE_URL=http://127.0.0.1:13001 E2E_LOGIN_TOKEN=your-token pnpm test:e2e tests/e2e/agent-workspace.spec.ts`

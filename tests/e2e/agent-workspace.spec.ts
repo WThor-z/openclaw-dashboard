@@ -8,6 +8,7 @@ const SCREENSHOT_PATH = path.join(
   "openclaw-agent-workspace",
   "task-11-agent-workspace.png"
 );
+const LOGIN_TOKEN = process.env.E2E_LOGIN_TOKEN ?? "dev-token";
 
 test("opens agent workspace and saves README.md", async ({ page }) => {
   let fileContent = "# README\n\nInitial content.";
@@ -102,16 +103,23 @@ test("opens agent workspace and saves README.md", async ({ page }) => {
   });
 
   await page.goto("/login");
-  await page.getByTestId("daemon-token-input").fill("dev-token");
+  await page.getByTestId("daemon-token-input").fill(LOGIN_TOKEN);
   await page.getByTestId("connect-button").click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByTestId("agent-workspace-title")).toBeVisible();
 
   await page.getByTestId("agent-card-agent-1").click();
-  await expect(page.getByRole("heading", { name: "Quick Notes" })).toBeVisible();
+
+  await expect(page.getByText("Alpha").first()).toBeVisible();
+  await page.getByRole("link", { name: "Preview Files" }).click();
+
+  await expect(page).toHaveURL(/\/agents\/agent-1\/quick-notes$/);
+  await expect(page.getByRole("heading", { name: "Preview Files" })).toBeVisible();
   await expect(page.getByRole("button", { name: "README.md" })).toBeVisible();
-  await page.getByRole("button", { name: "Open Full Workspace" }).click();
+  await expect(page.getByText("# README\n\nInitial content.")).toBeVisible();
+
+  await page.getByRole("link", { name: "Full Workspace" }).click();
 
   await expect(page).toHaveURL(/\/agents\/agent-1\/workspace$/);
   await page.getByRole("listitem").getByText("README.md").click();

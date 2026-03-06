@@ -1,5 +1,7 @@
 # @apps/daemon
 
+Language: English | [简体中文](README.zh-CN.md)
+
 `@apps/daemon` is the local backend for OpenClaw Dashboard.
 It exposes read APIs, guarded control APIs, monitoring endpoints, and the agent
 workspace file access used by the frontend.

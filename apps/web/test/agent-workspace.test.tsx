@@ -65,10 +65,21 @@ describe("AgentWorkspace layout", () => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
       if (requestUrl === "/api/agents") {
+        expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
+
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              items: [{ id: "agent-1", name: "Alpha", type: "worker", status: "idle" }]
+              items: [
+                {
+                  id: "agent-1",
+                  name: "Alpha",
+                  role: "worker",
+                  workspacePath: "/workspace/alpha",
+                  status: "idle",
+                  updatedAt: "2026-03-06T00:00:00.000Z"
+                }
+              ]
             }),
             {
               status: 200,

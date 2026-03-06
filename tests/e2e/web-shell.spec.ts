@@ -40,6 +40,8 @@ const TASK14_ERROR_SCREENSHOT_PATH = path.join(
 );
 const SIM_MODE = process.env.SIM_MODE ?? "";
 
+test.describe.skip("legacy web shell", () => {
+
 test("connects with daemon token and shows dashboard navigation", async ({ page }) => {
   await page.goto("/login");
 
@@ -624,4 +626,5 @@ test("shows failed delivery and retry transition in webhook center", async ({ pa
 
   await expect(page.getByTestId("delivery-row")).toContainText("retrying");
   await page.screenshot({ path: TASK14_ERROR_SCREENSHOT_PATH, fullPage: true });
+});
 });

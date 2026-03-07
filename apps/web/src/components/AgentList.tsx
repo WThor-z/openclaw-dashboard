@@ -125,7 +125,7 @@ export function AgentList({ onAgentClick, onAgentsChange }: AgentListProps) {
           message={error ? "无法加载 Agent 列表，请稍后再试。" : "部署您的第一个 Agent 以开始监控工作区活动。"}
           action={
             !error ? (
-              <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded transition-colors shadow-lg shadow-indigo-500/20">
+              <button className="rounded-lg bg-[#1f5ba6] px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-[#174d92]">
                 Initialize Agent
               </button>
             ) : null

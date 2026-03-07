@@ -10,10 +10,26 @@ interface StatCardProps {
 }
 
 export function StatCard({ title, value, change, changeType = "neutral", icon, color }: StatCardProps) {
+  const accentClass =
+    color === "blue"
+      ? "bg-[#edf4ff] text-[#1f5ba6]"
+      : color === "green"
+        ? "bg-[#ecf8f2] text-[#1b8152]"
+        : color === "orange"
+          ? "bg-[#fff6e9] text-[#9b6820]"
+          : "bg-[#fcf0ee] text-[#8c4338]";
+
   return (
     <div className="stat-card">
-      <div className="stat-label">{title}</div>
-      <div className="stat-value">{value}</div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="stat-label">{title}</div>
+          <div className="stat-value">{value}</div>
+        </div>
+        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-bold shadow-sm ${accentClass}`}>
+          {icon}
+        </div>
+      </div>
       {change && (
         <div className={`stat-change ${changeType}`}>
           {changeType === "positive" && "↑ "}

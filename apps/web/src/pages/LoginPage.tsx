@@ -1,63 +1,14 @@
-import React, { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../app/auth.js";
-import { LanguageSwitch, useI18n } from "../app/i18n.js";
-
-function ThemeToggle() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const { locale } = useI18n();
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") as "light" | "dark";
-    if (savedTheme) {
-      setTheme(savedTheme);
-      document.documentElement.setAttribute("data-theme", savedTheme);
-    } else if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches) {
-      setTheme("dark");
-      document.documentElement.setAttribute("data-theme", "dark");
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    const newTheme = theme === "light" ? "dark" : "light";
-    setTheme(newTheme);
-    document.documentElement.setAttribute("data-theme", newTheme);
-    localStorage.setItem("theme", newTheme);
-  };
-
-  return (
-    <button 
-      type="button"
-      className="theme-toggle"
-      onClick={toggleTheme}
-      aria-label={
-        theme === "light"
-          ? (locale === "zh-CN" ? "切换到暗色模式" : "Switch to dark mode")
-          : (locale === "zh-CN" ? "切换到亮色模式" : "Switch to light mode")
-      }
-    >
-      {theme === "light" ? "🌙" : "☀️"}
-    </button>
-  );
-}
+import { ThemeSwitch } from "../app/theme.js";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { signIn } = useAuth();
-  const { t } = useI18n();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-
-  // Initialize theme on mount
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme") as "light" | "dark";
-    if (savedTheme) {
-      document.documentElement.setAttribute("data-theme", savedTheme);
-    } else if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)")?.matches) {
-      document.documentElement.setAttribute("data-theme", "dark");
-    }
-  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,7 +16,7 @@ export function LoginPage() {
 
     const normalizedToken = token.trim();
     if (!normalizedToken) {
-      setError(t("login.error.tokenRequired"));
+      setError("请输入访问令牌");
       return;
     }
 
@@ -80,23 +31,23 @@ export function LoginPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError(t("login.error.invalidToken"));
+          setError("访问令牌无效，请检查后重试");
         } else {
-          setError(t("login.error.verifyFailed"));
+          setError("令牌验证失败，请稍后重试");
         }
         return;
       }
 
       const body = (await response.json()) as { ok?: boolean; authorized?: boolean };
       if (!body.ok || !body.authorized) {
-        setError(t("login.error.invalidToken"));
+        setError("访问令牌无效，请检查后重试");
         return;
       }
 
       signIn(normalizedToken);
       navigate("/dashboard");
     } catch {
-      setError(t("login.error.daemonUnavailable"));
+      setError("无法验证访问令牌，请确认 daemon 已启动");
     } finally {
       setIsLoading(false);
     }
@@ -110,24 +61,23 @@ export function LoginPage() {
             <div className="login-logo-icon">OC</div>
             <h1>OpenClaw Dashboard</h1>
           </div>
-          <p className="login-subtitle">{t("login.subtitle")}</p>
+          <p className="login-subtitle">本地优先的 AI 代理控制面板</p>
           <div className="login-controls">
-            <LanguageSwitch />
-            <ThemeToggle />
+            <ThemeSwitch className="theme-toggle" />
           </div>
         </div>
 
         <form className="login-form" onSubmit={onSubmit}>
           <div className="form-group">
             <label htmlFor="daemon-token-input" className="form-label">
-              {t("login.tokenLabel")}
+              访问令牌
             </label>
             <input
               id="daemon-token-input"
               data-testid="daemon-token-input"
               type="password"
               className={`input ${error ? "input-error" : ""}`}
-              placeholder={t("login.tokenPlaceholder")}
+              placeholder="输入您的访问令牌..."
               value={token}
               onChange={(event) => {
                 setToken(event.target.value);
@@ -136,7 +86,7 @@ export function LoginPage() {
               disabled={isLoading}
             />
             <span className="form-hint">
-              {t("login.tokenHint")}
+              令牌通常由管理员提供，用于验证您的身份
             </span>
           </div>
 
@@ -156,17 +106,17 @@ export function LoginPage() {
             {isLoading ? (
               <>
                 <span className="loading-spinner">⏳</span>
-                {t("login.connecting")}
+                连接中...
               </>
             ) : (
-              t("login.enterConsole")
+              "进入控制台"
             )}
           </button>
         </form>
 
         <div className="login-footer">
           <p>OpenClaw Dashboard v0.1.0</p>
-          <p className="text-muted">{t("login.footer.tagline")}</p>
+          <p className="text-muted">本地优先 · 安全可控 · 开源免费</p>
         </div>
       </div>
 

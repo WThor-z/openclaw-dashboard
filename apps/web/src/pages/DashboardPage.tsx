@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../app/auth.js";
+import { useI18n } from "../app/i18n.js";
 import { DashboardSidebar } from "../components/DashboardSidebar.js";
 import { OverviewPanel } from "../components/OverviewPanel.js";
 import { ApprovalsPanel, type ApprovalItem } from "../features/approvals/ApprovalsPanel.js";
@@ -18,18 +19,6 @@ import {
 import { TasksPanel, type TaskItem } from "../features/tasks/TasksPanel.js";
 import { MonitoringPanel } from "../features/monitoring/MonitoringPanel.js";
 import { WebhookCenterPanel } from "../features/webhooks/WebhookCenterPanel.js";
-
-const MODULE_META: Record<string, { title: string; subtitle: string; category: string }> = {
-  overview: { title: "控制面板", subtitle: "在一个画布中查看关键状态、任务和审批。", category: "Core" },
-  events: { title: "事件管理", subtitle: "追踪关键事件并快速定位来源与级别。", category: "Core" },
-  tasks: { title: "任务队列", subtitle: "关注执行状态并处理待运行任务。", category: "Core" },
-  approvals: { title: "审批中心", subtitle: "集中处理人工审批与失败重试。", category: "Core" },
-  config: { title: "配置中心", subtitle: "预览配置差异并安全发布到运行环境。", category: "Operations" },
-  costs: { title: "成本分析", subtitle: "观察成本趋势并判断优化窗口。", category: "Health" },
-  sessions: { title: "会话探索", subtitle: "检索会话并下钻到详细时间线。", category: "Operations" },
-  webhooks: { title: "Webhook 管理", subtitle: "管理 webhook 状态与投递入口。", category: "Operations" },
-  monitoring: { title: "系统监控", subtitle: "查看核心健康指标并发现异常信号。", category: "Health" }
-};
 
 function createIdempotencyKey(seed: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -53,6 +42,7 @@ function parseConfigDiff(value: unknown): ConfigDiffEntry[] {
 }
 
 export function DashboardPage() {
+  const { t } = useI18n();
   const { token } = useAuth();
   const [activeModule, setActiveModule] = useState("overview");
   const [connectionStatus, setConnectionStatus] = useState("loading");
@@ -87,7 +77,22 @@ export function DashboardPage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [submittingApprovalId, setSubmittingApprovalId] = useState<string | null>(null);
 
-  const activeModuleMeta = MODULE_META[activeModule] ?? MODULE_META.overview;
+  const moduleMeta = useMemo<Record<string, { title: string; subtitle: string; category: string }>>(
+    () => ({
+      overview: { title: t("dashboard.page.overview.title"), subtitle: t("dashboard.page.overview.subtitle"), category: t("dashboard.group.core") },
+      events: { title: t("dashboard.page.events.title"), subtitle: t("dashboard.page.events.subtitle"), category: t("dashboard.group.core") },
+      tasks: { title: t("dashboard.page.tasks.title"), subtitle: t("dashboard.page.tasks.subtitle"), category: t("dashboard.group.core") },
+      approvals: { title: t("dashboard.page.approvals.title"), subtitle: t("dashboard.page.approvals.subtitle"), category: t("dashboard.group.core") },
+      config: { title: t("dashboard.page.config.title"), subtitle: t("dashboard.page.config.subtitle"), category: t("dashboard.group.operations") },
+      costs: { title: t("dashboard.page.costs.title"), subtitle: t("dashboard.page.costs.subtitle"), category: t("dashboard.group.health") },
+      sessions: { title: t("dashboard.page.sessions.title"), subtitle: t("dashboard.page.sessions.subtitle"), category: t("dashboard.group.operations") },
+      webhooks: { title: t("dashboard.page.webhooks.title"), subtitle: t("dashboard.page.webhooks.subtitle"), category: t("dashboard.group.operations") },
+      monitoring: { title: t("dashboard.page.monitoring.title"), subtitle: t("dashboard.page.monitoring.subtitle"), category: t("dashboard.group.health") }
+    }),
+    [t]
+  );
+
+  const activeModuleMeta = moduleMeta[activeModule] ?? moduleMeta.overview;
 
   const configDraftKey = useMemo(
     () => `${configModelValue}::${configTemperatureValue}`,
@@ -194,10 +199,6 @@ export function DashboardPage() {
   }, [authHeaders]);
 
   useEffect(() => {
-    setConfigPreviewDraftKey(null);
-  }, [configDraftKey]);
-
-  useEffect(() => {
     let disposed = false;
     async function runInitialLoad() {
       if (!disposed) await refreshReadPanels();
@@ -246,17 +247,17 @@ export function DashboardPage() {
           )
         );
         setFailedApprovalIds((previous) => previous.filter((item) => item !== approvalId));
-        setStatusMessage("审批已处理");
+        setStatusMessage(t("dashboard.status.approvalResolved"));
       } catch {
         setFailedApprovalIds((previous) =>
           previous.includes(approvalId) ? previous : [...previous, approvalId]
         );
-        setStatusMessage("审批处理失败");
+        setStatusMessage(t("dashboard.status.approvalFailed"));
       } finally {
         setSubmittingApprovalId(null);
       }
     },
-    [token]
+    [t, token]
   );
 
   const selectedTimeline = useMemo<SessionTimelineItem[]>(() => {
@@ -274,25 +275,25 @@ export function DashboardPage() {
   const parseConfigDraft = useCallback(() => {
     const model = configModelValue.trim();
     if (!model) {
-      setConfigValidationError("模型不能为空");
+      setConfigValidationError(t("dashboard.status.modelRequired"));
       return null;
     }
     const temperature = Number.parseFloat(configTemperatureValue);
     if (!Number.isFinite(temperature)) {
-      setConfigValidationError("温度值必须是数字");
+      setConfigValidationError(t("dashboard.status.temperatureNumber"));
       return null;
     }
     setConfigValidationError(null);
     return { model, temperature };
-  }, [configModelValue, configTemperatureValue]);
+  }, [configModelValue, configTemperatureValue, t]);
 
   const armWrites = useCallback(async () => {
     const response = await fetch("/api/control/arm", {
       method: "POST",
       headers: { authorization: `Bearer ${token ?? ""}` }
     });
-    if (!response.ok) throw new Error("启用写入失败");
-  }, [token]);
+    if (!response.ok) throw new Error(t("dashboard.status.armFailed"));
+  }, [t, token]);
 
   const previewConfigDiff = useCallback(async () => {
     const configDraft = parseConfigDraft();
@@ -309,7 +310,7 @@ export function DashboardPage() {
         },
         body: JSON.stringify({ workspaceId: "global", config: configDraft })
       });
-      if (!response.ok) throw new Error("配置对比失败");
+      if (!response.ok) throw new Error(t("dashboard.status.diffFailed"));
       const body = (await response.json()) as { baseVersion?: number; diff?: unknown };
       const nextPreview: ConfigPreview = {
         baseVersion: Number(body.baseVersion ?? 0),
@@ -319,13 +320,13 @@ export function DashboardPage() {
       setConfigPreviewOpen(true);
       setConfigVersion(nextPreview.baseVersion);
       setConfigPreviewDraftKey(configDraftKey);
-      setStatusMessage("配置对比已就绪");
+      setStatusMessage(t("dashboard.status.diffReady"));
     } catch {
-      setStatusMessage("配置预览失败");
+      setStatusMessage(t("dashboard.status.previewFailed"));
     } finally {
       setIsPreviewingConfig(false);
     }
-  }, [armWrites, configDraftKey, parseConfigDraft, token]);
+  }, [armWrites, configDraftKey, parseConfigDraft, t, token]);
 
   const canApplyConfig =
     Boolean(configPreview) && configPreviewDraftKey === configDraftKey && !configValidationError;
@@ -350,18 +351,18 @@ export function DashboardPage() {
           config: configDraft
         })
       });
-      if (!response.ok) throw new Error("应用配置失败");
+      if (!response.ok) throw new Error(t("dashboard.status.applyFailed"));
       const body = (await response.json()) as { version?: number };
       const nextVersion = Number(body.version ?? configPreview.baseVersion + 1);
       setConfigVersion(nextVersion);
       setConfigPreviewOpen(false);
-      setStatusMessage("配置已应用");
+      setStatusMessage(t("dashboard.status.applied"));
     } catch {
-      setStatusMessage("配置应用失败");
+      setStatusMessage(t("dashboard.status.applyFailed"));
     } finally {
       setIsApplyingConfig(false);
     }
-  }, [armWrites, canApplyConfig, configPreview, parseConfigDraft, token]);
+  }, [armWrites, canApplyConfig, configPreview, parseConfigDraft, t, token]);
 
   const openSessionDrilldown = useCallback(async (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -369,13 +370,13 @@ export function DashboardPage() {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
         headers: authHeaders
       });
-      if (!response.ok) throw new Error("加载会话详情失败");
+      if (!response.ok) throw new Error(t("dashboard.status.loadSessionFailed"));
       const body = (await response.json()) as { session?: { status?: string } };
       setSelectedSessionStatus(body.session?.status ?? null);
     } catch {
-      setSelectedSessionStatus("unknown");
+      setSelectedSessionStatus(t("dashboard.status.unknown"));
     }
-  }, [authHeaders]);
+  }, [authHeaders, t]);
 
   // Calculate stats for overview
   const stats = useMemo(() => ({
@@ -396,7 +397,7 @@ export function DashboardPage() {
                 <div className="card-header">
                   <div className="card-title">
                     <div className="card-icon blue">⚡</div>
-                    最近事件
+                    {t("dashboard.section.recentEvents")}
                   </div>
                 </div>
                 <div className="card-body">
@@ -411,7 +412,7 @@ export function DashboardPage() {
                 <div className="card-header">
                   <div className="card-title">
                     <div className="card-icon orange">✅</div>
-                    待审批
+                    {t("dashboard.section.pendingApprovals")}
                   </div>
                 </div>
                 <div className="card-body">
@@ -432,7 +433,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon blue">⚡</div>
-                事件时间线
+                {t("dashboard.section.eventTimeline")}
               </div>
             </div>
             <div className="card-body">
@@ -450,7 +451,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon orange">📋</div>
-                任务队列
+                {t("dashboard.section.taskQueue")}
               </div>
             </div>
             <div className="card-body">
@@ -464,7 +465,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon green">✅</div>
-                审批管理
+                {t("dashboard.section.approvalManagement")}
               </div>
             </div>
             <div className="card-body">
@@ -483,7 +484,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon blue">⚙️</div>
-                配置中心
+                {t("dashboard.section.configCenter")}
               </div>
             </div>
             <div className="card-body">
@@ -497,8 +498,8 @@ export function DashboardPage() {
                 canApply={canApplyConfig}
                 isPreviewing={isPreviewingConfig}
                 isApplying={isApplyingConfig}
-                onModelChange={(value) => { setConfigModelValue(value); setConfigValidationError(null); }}
-                onTemperatureChange={(value) => { setConfigTemperatureValue(value); setConfigValidationError(null); }}
+                onModelChange={(value) => { setConfigModelValue(value); setConfigValidationError(null); setConfigPreviewDraftKey(null); }}
+                onTemperatureChange={(value) => { setConfigTemperatureValue(value); setConfigValidationError(null); setConfigPreviewDraftKey(null); }}
                 onPreview={previewConfigDiff}
                 onApply={applyConfig}
                 onClosePreview={() => setConfigPreviewOpen(false)}
@@ -512,7 +513,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon red">💰</div>
-                成本分析
+                {t("dashboard.section.costAnalytics")}
               </div>
             </div>
             <div className="card-body">
@@ -526,7 +527,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon blue">💬</div>
-                会话探索
+                {t("dashboard.section.sessionExplorer")}
               </div>
             </div>
             <div className="card-body">
@@ -552,7 +553,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon orange">🔔</div>
-                Webhook 管理
+                {t("dashboard.section.webhookManagement")}
               </div>
             </div>
             <div className="card-body">
@@ -566,7 +567,7 @@ export function DashboardPage() {
             <div className="card-header">
               <div className="card-title">
                 <div className="card-icon green">📈</div>
-                系统监控
+                {t("dashboard.section.systemMonitoring")}
               </div>
             </div>
             <div className="card-body">
@@ -599,7 +600,7 @@ export function DashboardPage() {
           <div className="header-actions">
             {lastUpdate && (
               <span className="text-sm text-muted">
-                上次更新: {lastUpdate.toLocaleTimeString()}
+                {t("dashboard.meta.lastUpdate", { value: lastUpdate.toLocaleTimeString() })}
               </span>
             )}
           </div>
@@ -609,11 +610,11 @@ export function DashboardPage() {
           <div className="dashboard-content-inner dashboard-module-stack">
             {statusMessage && (
               <div
-                className={`alert ${statusMessage.includes("失败") ? "alert-error" : "alert-success"}`}
-                role="status"
+                className={`alert ${statusMessage.toLowerCase().includes("failed") || statusMessage.includes("失败") ? "alert-error" : "alert-success"}`}
               >
                 {statusMessage}
                 <button
+                  type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => setStatusMessage(null)}
                   style={{ marginLeft: "auto" }}

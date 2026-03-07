@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../app/auth.js";
 import { LanguageSwitch, useI18n } from "../app/i18n.js";
+import { ThemeSwitch } from "../app/theme.js";
 
 interface SidebarProps {
   activeModule: string;
@@ -120,6 +121,7 @@ export function DashboardSidebar({ activeModule, onModuleChange, connectionStatu
             </div>
           </div>
           <LanguageSwitch />
+          <ThemeSwitch />
           <button 
             type="button"
             className="btn btn-ghost btn-sm"

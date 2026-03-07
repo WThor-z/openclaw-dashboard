@@ -429,3 +429,57 @@
     display: block;
   }
 }
+
+[data-theme="dark"] .dashboard-sidebar {
+  background: linear-gradient(180deg, #182334, #131f2f);
+  border-right-color: #2b3d52;
+}
+
+[data-theme="dark"] .sidebar-header,
+[data-theme="dark"] .sidebar-footer {
+  border-color: #2b3d52;
+}
+
+[data-theme="dark"] .sidebar-logo,
+[data-theme="dark"] .user-name,
+[data-theme="dark"] .header-title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .sidebar-nav-title,
+[data-theme="dark"] .user-role {
+  color: var(--color-text-muted);
+}
+
+[data-theme="dark"] .sidebar-nav-link {
+  color: #bdcce0;
+}
+
+[data-theme="dark"] .sidebar-nav-link:hover {
+  background-color: #223246;
+  color: #e6eef9;
+}
+
+[data-theme="dark"] .sidebar-nav-link.active {
+  background: linear-gradient(120deg, #284467, #223c5b);
+  color: #e8f2ff;
+  box-shadow: inset 0 0 0 1px #385579;
+}
+
+[data-theme="dark"] .dashboard-header {
+  background: rgb(20 30 44 / 0.85);
+  border-bottom-color: #2a3b50;
+}
+
+[data-theme="dark"] .connection-badge {
+  background-color: #1d2d42;
+}
+
+[data-theme="dark"] .mobile-menu-toggle {
+  color: #d9e8fa;
+}
+
+[data-theme="dark"] .mobile-menu-toggle:hover {
+  background-color: #223449;
+  color: #f1f7ff;
+}

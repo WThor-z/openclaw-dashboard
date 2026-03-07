@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { LanguageSwitch, useI18n } from "../app/i18n.js";
+import { ThemeSwitch } from "../app/theme.js";
 import { type Agent } from "./AgentCard.js";
 
 type AgentWorkspaceSidebarProps = {
@@ -99,6 +100,7 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
         <h2 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Agent Workspace</h2>
         <div className="sidebar-lang-switch mt-3">
           <LanguageSwitch />
+          <ThemeSwitch />
         </div>
       </div>
 

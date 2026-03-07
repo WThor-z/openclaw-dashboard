@@ -88,6 +88,56 @@
   --transition-slow: 340ms ease;
 }
 
+[data-theme="dark"] {
+  --color-bg-primary: #0f1724;
+  --color-bg-secondary: #121c2b;
+  --color-bg-tertiary: #1a2536;
+  --color-bg-card: #1a2433;
+  --color-bg-hover: #223145;
+  --color-bg-active: #2b3c52;
+
+  --color-text-primary: #e7eef8;
+  --color-text-secondary: #b5c4d8;
+  --color-text-tertiary: #92a4bb;
+  --color-text-muted: #7f91a8;
+
+  --color-border: #2c3c50;
+  --color-border-light: #24354a;
+  --color-divider: #2a3b51;
+
+  --color-brand-50: #1d2f49;
+  --color-brand-100: #244061;
+  --color-brand-200: #2f557c;
+  --color-brand-500: #6ba8ff;
+  --color-brand-600: #8dbdff;
+  --color-brand-700: #b8d8ff;
+
+  --color-success-50: #173626;
+  --color-success-100: #1d4931;
+  --color-success-500: #45bb80;
+  --color-success-600: #5dd192;
+
+  --color-warning-50: #3c301a;
+  --color-warning-100: #504023;
+  --color-warning-500: #d6a151;
+  --color-warning-600: #e2b46d;
+
+  --color-error-50: #412321;
+  --color-error-100: #56302d;
+  --color-error-500: #d98479;
+  --color-error-600: #ea9a90;
+
+  --color-info-50: #1a3242;
+  --color-info-100: #1f4257;
+  --color-info-500: #58aee0;
+  --color-info-600: #74bfe9;
+
+  --shadow-sm: 0 8px 18px rgb(4 9 16 / 0.35);
+  --shadow-md: 0 14px 28px rgb(4 9 16 / 0.42);
+  --shadow-lg: 0 24px 44px rgb(4 9 16 / 0.5);
+  --shadow-xl: 0 32px 62px rgb(4 9 16 / 0.55);
+}
+
 *,
 *::before,
 *::after {
@@ -105,6 +155,17 @@ body {
   background:
     radial-gradient(circle at 10% 0%, rgb(209 225 244 / 0.6), transparent 38%),
     radial-gradient(circle at 90% 10%, rgb(227 237 248 / 0.58), transparent 36%),
+    var(--color-bg-primary);
+}
+
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+html[data-theme="dark"],
+body[data-theme="dark"] {
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 12% 0%, rgb(37 66 98 / 0.34), transparent 42%),
+    radial-gradient(circle at 88% 8%, rgb(29 49 75 / 0.28), transparent 40%),
     var(--color-bg-primary);
 }
 
@@ -194,6 +255,18 @@ h3,
 
 ::-webkit-scrollbar-thumb:hover {
   background: #97a8ba;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #1b293b;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #3a516c;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #4a6687;
 }
 
 :focus-visible {

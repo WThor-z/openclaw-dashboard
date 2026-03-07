@@ -123,15 +123,16 @@ export function EventsPanel({ events, filterValue, onFilterChange }: EventsPanel
 
         .event-item {
           padding: var(--space-4);
-          background-color: var(--color-bg-secondary);
-          border: 1px solid var(--color-border);
-          border-radius: var(--radius-md);
+          background: linear-gradient(180deg, #ffffff, #f8fafc);
+          border: 1px solid var(--color-border-light);
+          border-radius: 1rem;
           transition: all var(--transition-fast);
+          box-shadow: var(--shadow-sm);
         }
 
         .event-item:hover {
           border-color: var(--color-brand-200);
-          box-shadow: var(--shadow-sm);
+          box-shadow: var(--shadow-md);
         }
 
         .event-header {
@@ -157,6 +158,7 @@ export function EventsPanel({ events, filterValue, onFilterChange }: EventsPanel
           font-size: var(--text-sm);
           font-weight: var(--font-medium);
           color: var(--color-text-primary);
+          line-height: 1.55;
         }
 
         .event-source {

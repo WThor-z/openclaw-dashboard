@@ -1,9 +1,11 @@
 import React, { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../app/auth.js";
+import { LanguageSwitch, useI18n } from "../app/i18n.js";
 
 function ThemeToggle() {
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const { locale } = useI18n();
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme") as "light" | "dark";
@@ -25,9 +27,14 @@ function ThemeToggle() {
 
   return (
     <button 
+      type="button"
       className="theme-toggle"
       onClick={toggleTheme}
-      aria-label={theme === "light" ? "切换到暗色模式" : "切换到亮色模式"}
+      aria-label={
+        theme === "light"
+          ? (locale === "zh-CN" ? "切换到暗色模式" : "Switch to dark mode")
+          : (locale === "zh-CN" ? "切换到亮色模式" : "Switch to light mode")
+      }
     >
       {theme === "light" ? "🌙" : "☀️"}
     </button>
@@ -37,6 +44,7 @@ function ThemeToggle() {
 export function LoginPage() {
   const navigate = useNavigate();
   const { signIn } = useAuth();
+  const { t } = useI18n();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -57,7 +65,7 @@ export function LoginPage() {
 
     const normalizedToken = token.trim();
     if (!normalizedToken) {
-      setError("请输入访问令牌");
+      setError(t("login.error.tokenRequired"));
       return;
     }
 
@@ -72,23 +80,23 @@ export function LoginPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          setError("访问令牌无效，请检查后重试");
+          setError(t("login.error.invalidToken"));
         } else {
-          setError("令牌验证失败，请稍后重试");
+          setError(t("login.error.verifyFailed"));
         }
         return;
       }
 
       const body = (await response.json()) as { ok?: boolean; authorized?: boolean };
       if (!body.ok || !body.authorized) {
-        setError("访问令牌无效，请检查后重试");
+        setError(t("login.error.invalidToken"));
         return;
       }
 
       signIn(normalizedToken);
       navigate("/dashboard");
     } catch {
-      setError("无法验证访问令牌，请确认 daemon 已启动");
+      setError(t("login.error.daemonUnavailable"));
     } finally {
       setIsLoading(false);
     }
@@ -102,31 +110,33 @@ export function LoginPage() {
             <div className="login-logo-icon">OC</div>
             <h1>OpenClaw Dashboard</h1>
           </div>
-          <p className="login-subtitle">本地优先的 AI 代理控制面板</p>
-          <ThemeToggle />
+          <p className="login-subtitle">{t("login.subtitle")}</p>
+          <div className="login-controls">
+            <LanguageSwitch />
+            <ThemeToggle />
+          </div>
         </div>
 
         <form className="login-form" onSubmit={onSubmit}>
           <div className="form-group">
             <label htmlFor="daemon-token-input" className="form-label">
-              访问令牌
+              {t("login.tokenLabel")}
             </label>
             <input
               id="daemon-token-input"
               data-testid="daemon-token-input"
               type="password"
               className={`input ${error ? "input-error" : ""}`}
-              placeholder="输入您的访问令牌..."
+              placeholder={t("login.tokenPlaceholder")}
               value={token}
               onChange={(event) => {
                 setToken(event.target.value);
                 setError(null);
               }}
               disabled={isLoading}
-              autoFocus
             />
             <span className="form-hint">
-              令牌通常由管理员提供，用于验证您的身份
+              {t("login.tokenHint")}
             </span>
           </div>
 
@@ -146,17 +156,17 @@ export function LoginPage() {
             {isLoading ? (
               <>
                 <span className="loading-spinner">⏳</span>
-                连接中...
+                {t("login.connecting")}
               </>
             ) : (
-              "进入控制台"
+              t("login.enterConsole")
             )}
           </button>
         </form>
 
         <div className="login-footer">
           <p>OpenClaw Dashboard v0.1.0</p>
-          <p className="text-muted">本地优先 · 安全可控 · 开源免费</p>
+          <p className="text-muted">{t("login.footer.tagline")}</p>
         </div>
       </div>
 
@@ -220,10 +230,13 @@ export function LoginPage() {
           margin-top: var(--space-2);
         }
 
-        .login-header .theme-toggle {
+        .login-controls {
           position: absolute;
           top: 0;
           right: 0;
+          display: flex;
+          align-items: center;
+          gap: var(--space-2);
         }
 
         .login-form {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../app/auth.js";
+import { useI18n } from "../app/i18n.js";
 import { type Agent } from "../components/AgentCard.js";
 import { AgentWorkspaceSidebar } from "../components/AgentWorkspaceSidebar.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -10,6 +11,7 @@ import { collectMarkdownPaths, type DaemonWorkspaceNode } from "../features/agen
 import { loadStoredPinnedNotes, saveSelectedAgentId, saveStoredPinnedNotes } from "../features/agent-workspace/storage.js";
 
 export function AgentWorkspacePinnedFilesPage() {
+  const { t } = useI18n();
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -26,7 +28,7 @@ export function AgentWorkspacePinnedFilesPage() {
     if (!agentId || !token) {
       setIsAgentLoading(false);
       setAgent(null);
-      setAgentError("Agent not found.");
+      setAgentError(t("workspace.pinned.unavailable"));
       return;
     }
 
@@ -56,7 +58,7 @@ export function AgentWorkspacePinnedFilesPage() {
 
         if (!matchedAgent) {
           setAgent(null);
-          setAgentError("Agent not found.");
+          setAgentError(t("workspace.pinned.unavailable"));
           return;
         }
 
@@ -65,7 +67,7 @@ export function AgentWorkspacePinnedFilesPage() {
       } catch {
         if (!cancelled) {
           setAgent(null);
-          setAgentError("Failed to load agent.");
+          setAgentError(t("workspace.pinned.unavailable"));
         }
       } finally {
         if (!cancelled) {
@@ -79,7 +81,7 @@ export function AgentWorkspacePinnedFilesPage() {
     return () => {
       cancelled = true;
     };
-  }, [agentId, token]);
+  }, [agentId, t, token]);
 
   useEffect(() => {
     if (!agent || !token) {
@@ -112,7 +114,7 @@ export function AgentWorkspacePinnedFilesPage() {
         setPinnedNotePaths(storedPaths);
       } catch {
         if (!cancelled) {
-          setWorkspaceError("Failed to load markdown file list.");
+          setWorkspaceError(t("workspace.pinned.unavailable"));
         }
       } finally {
         if (!cancelled) {
@@ -126,7 +128,7 @@ export function AgentWorkspacePinnedFilesPage() {
     return () => {
       cancelled = true;
     };
-  }, [agent, token]);
+  }, [agent, t, token]);
 
   const togglePinnedPath = useCallback(
     (path: string) => {
@@ -154,7 +156,7 @@ export function AgentWorkspacePinnedFilesPage() {
     [navigate]
   );
 
-  const pinnedCountLabel = useMemo(() => `${pinnedNotePaths.length} selected`, [pinnedNotePaths.length]);
+  const pinnedCountLabel = useMemo(() => t("workspace.pinned.selectedCount", { count: pinnedNotePaths.length }), [pinnedNotePaths.length, t]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-transparent text-slate-800 selection:bg-[#dbe9ff]">
@@ -162,10 +164,10 @@ export function AgentWorkspacePinnedFilesPage() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         <header className="border-b border-slate-200 bg-white/80 px-10 py-5 backdrop-blur-md">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>
-            Pinned Files
-          </h1>
-        </header>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>
+              {t("workspace.pinned.title")}
+            </h1>
+          </header>
 
         <div className="flex-1 overflow-y-auto p-10">
           {isAgentLoading ? (
@@ -174,20 +176,20 @@ export function AgentWorkspacePinnedFilesPage() {
               <Skeleton variant="panel" className="h-96" />
             </div>
           ) : agentError || !agent ? (
-            <EmptyState title="Pinned files unavailable" message={agentError ?? "Agent not found."} className="h-full" />
+            <EmptyState title={t("workspace.pinned.unavailable")} message={agentError ?? t("workspace.pinned.unavailable")} className="h-full" />
           ) : (
             <div className="mx-auto max-w-[900px] space-y-6">
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">Configuration</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">{t("workspace.pinned.configuration")}</p>
                     <h2 className="mt-3 text-2xl font-semibold text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>{agent.name}</h2>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">Choose which markdown files should be pinned for this agent's preview drawer.</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{t("workspace.pinned.selectForAgent")}</p>
                   </div>
 
                   <div className="flex items-end gap-3">
                     <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500" htmlFor="pinned-files-agent-select">
-                      Agent
+                      {t("workspace.pinned.agent")}
                       <select
                         id="pinned-files-agent-select"
                         value={agent.id}
@@ -210,14 +212,14 @@ export function AgentWorkspacePinnedFilesPage() {
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 {isWorkspaceLoading ? (
                   <div className="space-y-2">
-                    {Array.from({ length: 8 }).map((_, index) => (
-                      <Skeleton key={index} variant="line" className="h-6" />
+                    {["sk-1", "sk-2", "sk-3", "sk-4", "sk-5", "sk-6", "sk-7", "sk-8"].map((skeletonId) => (
+                      <Skeleton key={skeletonId} variant="line" className="h-6" />
                     ))}
                   </div>
                 ) : workspaceError ? (
                   <p className="text-sm text-rose-700">{workspaceError}</p>
                 ) : availableMarkdownPaths.length === 0 ? (
-                  <EmptyState title="No markdown files found" message="This agent does not currently expose previewable markdown files." className="px-0 py-8" />
+                    <EmptyState title={t("workspace.pinned.noMarkdown")} message={t("workspace.pinned.noMarkdownHint")} className="px-0 py-8" />
                 ) : (
                   <div className="space-y-2">
                     {availableMarkdownPaths.map((path) => (
@@ -241,7 +243,7 @@ export function AgentWorkspacePinnedFilesPage() {
                   className="btn btn-secondary"
                   onClick={() => navigate("/dashboard")}
                 >
-                  Back to overview
+                  {t("workspace.pinned.backToOverview")}
                 </button>
               </div>
             </div>

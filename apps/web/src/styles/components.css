@@ -232,6 +232,37 @@
   color: var(--color-text-secondary);
 }
 
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d2deea;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: white;
+}
+
+.language-switch-button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  padding: 6px 10px;
+  min-width: 58px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.language-switch-button + .language-switch-button {
+  border-left: 1px solid #e4ecf5;
+}
+
+.language-switch-button.active {
+  background: #edf4ff;
+  color: #123f77;
+}
+
 /* Lists */
 .list {
   list-style: none;

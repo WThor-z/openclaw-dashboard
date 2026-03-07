@@ -170,9 +170,10 @@ export function ApprovalsPanel({
           flex-direction: column;
           align-items: center;
           padding: var(--space-4) var(--space-6);
-          background-color: var(--color-bg-secondary);
-          border-radius: var(--radius-lg);
+          background: linear-gradient(180deg, #ffffff, #f8fafc);
+          border-radius: 1rem;
           min-width: 100px;
+          box-shadow: var(--shadow-sm);
         }
 
         .approval-stat.pending {
@@ -203,10 +204,11 @@ export function ApprovalsPanel({
 
         .approval-card {
           padding: var(--space-4);
-          background-color: var(--color-bg-secondary);
-          border: 1px solid var(--color-border);
-          border-radius: var(--radius-lg);
+          background: linear-gradient(180deg, #ffffff, #f7f9fc);
+          border: 1px solid var(--color-border-light);
+          border-radius: 1rem;
           border-left: 4px solid var(--color-border);
+          box-shadow: var(--shadow-sm);
         }
 
         .approval-card.pending {
@@ -242,6 +244,7 @@ export function ApprovalsPanel({
           font-size: var(--text-sm);
           font-weight: var(--font-medium);
           color: var(--color-text-primary);
+          line-height: 1.6;
         }
 
         .approval-actions {
@@ -253,14 +256,9 @@ export function ApprovalsPanel({
           margin-top: var(--space-3);
           padding: var(--space-2) var(--space-3);
           background-color: var(--color-error-50);
-          color: var(--color-error-700);
+          color: var(--color-error-600);
           border-radius: var(--radius-md);
           font-size: var(--text-sm);
-        }
-
-        [data-theme="dark"] .approval-error {
-          background-color: rgba(239, 68, 68, 0.1);
-          color: var(--color-error-200);
         }
 
         .approval-preview {
@@ -269,6 +267,7 @@ export function ApprovalsPanel({
           background-color: var(--color-bg-secondary);
           border-radius: var(--radius-md);
           text-align: center;
+          border: 1px solid var(--color-border-light);
         }
 
         .text-muted {

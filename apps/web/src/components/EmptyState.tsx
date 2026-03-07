@@ -10,15 +10,15 @@ interface EmptyStateProps {
 export function EmptyState({ title, message, action, className }: EmptyStateProps) {
   return (
     <div
-      className={`rounded-lg border border-zinc-800/70 bg-zinc-950/40 px-5 py-8 text-center ${
+      className={`rounded-2xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm ${
         className ?? ""
       }`.trim()}
       role="status"
       aria-live="polite"
     >
-      <p className="text-xs font-bold uppercase tracking-widest text-zinc-500">No data</p>
-      <h3 className="mt-2 text-sm font-semibold text-zinc-100">{title}</h3>
-      {message ? <p className="mt-2 text-xs text-zinc-400">{message}</p> : null}
+      <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">No data</p>
+      <h3 className="mt-3 text-lg font-semibold text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>{title}</h3>
+      {message ? <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">{message}</p> : null}
       {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
     </div>
   );

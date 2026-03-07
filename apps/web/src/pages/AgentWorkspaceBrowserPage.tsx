@@ -20,6 +20,40 @@ interface DaemonWorkspaceNode {
   children?: DaemonWorkspaceNode[];
 }
 
+type ContextTargetKind = "file" | "directory" | "background";
+
+type ContextMenuState = {
+  x: number;
+  y: number;
+  kind: ContextTargetKind;
+  path: string | null;
+  directoryPath: string;
+};
+
+type MoveDialogState = {
+  path: string;
+  kind: "file" | "directory";
+  targetDirectory: string;
+};
+
+type OperationDialogState =
+  | {
+    mode: "create-file" | "create-folder";
+    directoryPath: string;
+    value: string;
+  }
+  | {
+    mode: "rename";
+    path: string;
+    kind: "file" | "directory";
+    value: string;
+  }
+  | {
+    mode: "delete";
+    path: string;
+    kind: "file" | "directory";
+  };
+
 function toFileTreeNodes(nodes: DaemonWorkspaceNode[]): WorkspaceFile[] {
   return nodes.map((node) => ({
     name: node.name,
@@ -46,6 +80,41 @@ function findNodeByPath(items: WorkspaceFile[], targetPath: string): WorkspaceFi
   return null;
 }
 
+const EDITABLE_FILE_PATTERN = /\.(md|txt)$/i;
+
+function isEditableFilePath(filePath: string | null) {
+  return typeof filePath === "string" && EDITABLE_FILE_PATTERN.test(filePath);
+}
+
+function resolveParentDirectoryPath(targetPath: string) {
+  const normalized = targetPath.replace(/\\+/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const lastSlashIndex = normalized.lastIndexOf("/");
+  return lastSlashIndex >= 0 ? normalized.slice(0, lastSlashIndex) : "";
+}
+
+function joinRelativePath(directoryPath: string, fileName: string) {
+  return directoryPath.length > 0 ? `${directoryPath}/${fileName}` : fileName;
+}
+
+function collectDirectoryPaths(items: WorkspaceFile[]) {
+  const directories = new Set<string>();
+  directories.add("");
+
+  const traverse = (nodes: WorkspaceFile[]) => {
+    for (const node of nodes) {
+      if (node.kind === "directory") {
+        directories.add(node.path);
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          traverse(node.children);
+        }
+      }
+    }
+  };
+
+  traverse(items);
+  return [...directories].sort((left, right) => left.localeCompare(right));
+}
+
 export function AgentWorkspaceBrowserPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
@@ -64,7 +133,13 @@ export function AgentWorkspaceBrowserPage() {
   const [selectedFileError, setSelectedFileError] = useState<string | null>(null);
   const [isFileLoading, setIsFileLoading] = useState(false);
   const [isEditingFile, setIsEditingFile] = useState(false);
+  const [isFileOperationLoading, setIsFileOperationLoading] = useState(false);
+  const [fileOperationError, setFileOperationError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [moveDialog, setMoveDialog] = useState<MoveDialogState | null>(null);
+  const [operationDialog, setOperationDialog] = useState<OperationDialogState | null>(null);
   const closeGuardRef = useRef<(() => boolean) | null>(null);
+  const treePanelRef = useRef<HTMLDivElement | null>(null);
   const agentStatus = useAgentStatus({
     agentId: agent?.id ?? null,
     token,
@@ -96,6 +171,58 @@ export function AgentWorkspaceBrowserPage() {
         setSelectedFileError("Failed to load file content.");
       } finally {
         setIsFileLoading(false);
+      }
+    },
+    [token]
+  );
+
+  const armWrites = useCallback(async () => {
+    const response = await fetch("/api/control/arm", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token ?? ""}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to arm writes");
+    }
+  }, [token]);
+
+  const loadWorkspaceTree = useCallback(
+    async (nextAgentId: string, options: { resetSelection: boolean }) => {
+      setIsWorkspaceLoading(true);
+      setWorkspaceError(null);
+      setFileOperationError(null);
+
+      if (options.resetSelection) {
+        setWorkspaceItems([]);
+        setSelectedPath(null);
+        setSelectedPathKind(null);
+        setSelectedFileContent("");
+        setSelectedFileModifiedAt(null);
+        setSelectedFileError(null);
+        setIsEditingFile(false);
+        closeGuardRef.current = null;
+      }
+
+      try {
+        const response = await fetch(`/api/agents/${encodeURIComponent(nextAgentId)}/files`, {
+          headers: {
+            authorization: `Bearer ${token ?? ""}`
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load workspace files");
+        }
+
+        const body = (await response.json()) as { items?: DaemonWorkspaceNode[] };
+        setWorkspaceItems(toFileTreeNodes(Array.isArray(body.items) ? body.items : []));
+      } catch {
+        setWorkspaceError("Failed to load workspace files.");
+      } finally {
+        setIsWorkspaceLoading(false);
       }
     },
     [token]
@@ -169,60 +296,256 @@ export function AgentWorkspaceBrowserPage() {
 
     let isCancelled = false;
 
-    const loadWorkspace = async () => {
-      setIsWorkspaceLoading(true);
-      setWorkspaceError(null);
-      setWorkspaceItems([]);
-      setSelectedPath(null);
-      setSelectedPathKind(null);
-      setSelectedFileContent("");
-      setSelectedFileModifiedAt(null);
-      setSelectedFileError(null);
-      setIsEditingFile(false);
-      closeGuardRef.current = null;
-
-      try {
-        const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/files`, {
-          headers: {
-            authorization: `Bearer ${token}`
-          }
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to load workspace files");
-        }
-
-        const body = (await response.json()) as { items?: DaemonWorkspaceNode[] };
-        if (isCancelled) {
-          return;
-        }
-
-        setWorkspaceItems(toFileTreeNodes(Array.isArray(body.items) ? body.items : []));
-      } catch {
-        if (!isCancelled) {
-          setWorkspaceError("Failed to load workspace files.");
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsWorkspaceLoading(false);
-        }
-      }
-    };
-
-    void loadWorkspace();
+    void loadWorkspaceTree(agent.id, { resetSelection: true });
 
     return () => {
       isCancelled = true;
     };
-  }, [agent?.id, token]);
+  }, [agent?.id, loadWorkspaceTree, token]);
 
   const isEditableTextFile = useMemo(() => {
     if (selectedPathKind !== "file" || !selectedPath) {
       return false;
     }
 
-    return /\.(md|txt)$/i.test(selectedPath);
+    return isEditableFilePath(selectedPath);
   }, [selectedPath, selectedPathKind]);
+
+  const directoryPaths = useMemo(() => collectDirectoryPaths(workspaceItems), [workspaceItems]);
+
+  const sendControlMutation = useCallback(
+    async <T extends object>(url: string, body: T, idempotencySeed: string) => {
+      await armWrites();
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token ?? ""}`,
+          "content-type": "application/json",
+          "idempotency-key": `${Date.now()}-${idempotencySeed}-${Math.random().toString(36).slice(2)}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        let message = `Request failed (${response.status}) at ${url}.`;
+        const cloned = response.clone();
+        try {
+          const errorBody = (await cloned.json()) as { error?: { message?: string } };
+          if (typeof errorBody?.error?.message === "string" && errorBody.error.message.trim().length > 0) {
+            message = errorBody.error.message;
+          }
+        } catch {
+          try {
+            const textBody = (await response.text()).trim();
+            if (textBody.length > 0) {
+              message = `${message} ${textBody.slice(0, 180)}`;
+            }
+          } catch {
+            // keep fallback message
+          }
+        }
+
+        if (response.status === 404 && message === `Request failed (${response.status}) at ${url}.`) {
+          message = `Control API route not found (${url}). Restart daemon with latest code.`;
+        }
+
+        throw new Error(message);
+      }
+
+      return (await response.json()) as { ok: boolean; path?: string; nextPath?: string; modifiedAt?: string };
+    },
+    [armWrites, token]
+  );
+
+  const handleCreateFileAt = useCallback(
+    async (filePath: string) => {
+      if (!agent) {
+        return;
+      }
+
+      const normalizedPath = filePath.trim().replace(/\\+/g, "/").replace(/^\/+/, "");
+      if (!isEditableFilePath(normalizedPath)) {
+        setFileOperationError("Only .md and .txt files are supported for file operations.");
+        return;
+      }
+
+      setIsFileOperationLoading(true);
+      setFileOperationError(null);
+      try {
+        try {
+          await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/files/create`, { path: normalizedPath, content: "" }, "file-create");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (!message.includes("(404)")) {
+            throw error;
+          }
+
+          await sendControlMutation(
+            `/api/control/agents/${encodeURIComponent(agent.id)}/files/${encodeURIComponent(normalizedPath)}`,
+            { content: "" },
+            "file-create-legacy"
+          );
+        }
+
+        await loadWorkspaceTree(agent.id, { resetSelection: false });
+        setSelectedPath(normalizedPath);
+        setSelectedPathKind("file");
+        await loadFileContent(agent.id, normalizedPath);
+        setIsEditingFile(true);
+      } catch (error) {
+        setFileOperationError(error instanceof Error ? error.message : "Failed to create file.");
+      } finally {
+        setIsFileOperationLoading(false);
+      }
+    },
+    [agent, loadFileContent, loadWorkspaceTree, sendControlMutation]
+  );
+
+  const handleCreateFolderAt = useCallback(
+    async (directoryPath: string) => {
+      if (!agent) {
+        return;
+      }
+
+      const normalizedPath = directoryPath.trim().replace(/\\+/g, "/").replace(/^\/+/, "");
+      if (normalizedPath.length === 0) {
+        setFileOperationError("Folder path is required.");
+        return;
+      }
+
+      setIsFileOperationLoading(true);
+      setFileOperationError(null);
+      try {
+        await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/folders/create`, { path: normalizedPath }, "folder-create");
+        await loadWorkspaceTree(agent.id, { resetSelection: false });
+      } catch (error) {
+        setFileOperationError(error instanceof Error ? error.message : "Failed to create folder.");
+      } finally {
+        setIsFileOperationLoading(false);
+      }
+    },
+    [agent, loadWorkspaceTree, sendControlMutation]
+  );
+
+  const handleRenamePath = useCallback(
+    async (pathToRename: string, kind: "file" | "directory", nextName: string) => {
+      if (!agent) {
+        return;
+      }
+
+      const parent = resolveParentDirectoryPath(pathToRename);
+      const trimmedName = nextName.trim();
+      if (!trimmedName) {
+        setFileOperationError("Name is required.");
+        return;
+      }
+
+      const targetPath = joinRelativePath(parent, trimmedName);
+
+      setIsFileOperationLoading(true);
+      setFileOperationError(null);
+      try {
+        const body = await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/rename`, { path: pathToRename, nextPath: targetPath }, "path-rename");
+        await loadWorkspaceTree(agent.id, { resetSelection: false });
+        const nextPath = typeof body.nextPath === "string" ? body.nextPath : targetPath;
+        setSelectedPath(nextPath);
+        setSelectedPathKind(kind);
+        if (kind === "file") {
+          await loadFileContent(agent.id, nextPath);
+        }
+      } catch (error) {
+        setFileOperationError(error instanceof Error ? error.message : "Failed to rename path.");
+      } finally {
+        setIsFileOperationLoading(false);
+      }
+    },
+    [agent, loadFileContent, loadWorkspaceTree, sendControlMutation]
+  );
+
+  const handleDeletePath = useCallback(
+    async (pathToDelete: string, kind: "file" | "directory") => {
+      if (!agent) {
+        return;
+      }
+
+      setIsFileOperationLoading(true);
+      setFileOperationError(null);
+      try {
+        if (kind === "file") {
+          try {
+            await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/delete`, { path: pathToDelete, recursive: true }, "path-delete");
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "";
+            if (!message.includes("(404)")) {
+              throw error;
+            }
+
+            try {
+              await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/files/delete`, { path: pathToDelete }, "file-delete-legacy-body");
+            } catch (legacyError) {
+              const legacyMessage = legacyError instanceof Error ? legacyError.message : "";
+              if (!legacyMessage.includes("(404)")) {
+                throw legacyError;
+              }
+
+              await sendControlMutation(
+                `/api/control/agents/${encodeURIComponent(agent.id)}/files/${encodeURIComponent(pathToDelete)}/delete`,
+                {},
+                "file-delete-legacy-path"
+              );
+            }
+          }
+        } else {
+          await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/delete`, { path: pathToDelete, recursive: true }, "path-delete");
+        }
+
+        await loadWorkspaceTree(agent.id, { resetSelection: false });
+        if (selectedPath === pathToDelete || selectedPath?.startsWith(`${pathToDelete}/`)) {
+          setSelectedPath(null);
+          setSelectedPathKind(null);
+          setSelectedFileContent("");
+          setSelectedFileModifiedAt(null);
+          setSelectedFileError(null);
+          setIsEditingFile(false);
+          closeGuardRef.current = null;
+        }
+      } catch (error) {
+        setFileOperationError(error instanceof Error ? error.message : "Failed to delete path.");
+      } finally {
+        setIsFileOperationLoading(false);
+      }
+    },
+    [agent, loadWorkspaceTree, selectedPath, sendControlMutation]
+  );
+
+  const handleMovePath = useCallback(
+    async (pathToMove: string, kind: "file" | "directory", targetDirectory: string) => {
+      if (!agent) {
+        return;
+      }
+
+      setIsFileOperationLoading(true);
+      setFileOperationError(null);
+      try {
+        const body = await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/move`, { path: pathToMove, targetDirectory }, "path-move");
+        await loadWorkspaceTree(agent.id, { resetSelection: false });
+        const nextPath = typeof body.nextPath === "string" ? body.nextPath : null;
+        if (nextPath) {
+          setSelectedPath(nextPath);
+          setSelectedPathKind(kind);
+          if (kind === "file") {
+            await loadFileContent(agent.id, nextPath);
+          }
+        }
+      } catch (error) {
+        setFileOperationError(error instanceof Error ? error.message : "Failed to move path.");
+      } finally {
+        setIsFileOperationLoading(false);
+      }
+    },
+    [agent, loadFileContent, loadWorkspaceTree, sendControlMutation]
+  );
 
   const handleFileSelect = useCallback(
     (path: string) => {
@@ -256,44 +579,155 @@ export function AgentWorkspaceBrowserPage() {
     closeGuardRef.current = null;
   }, []);
 
+  const openContextMenu = useCallback((payload: Omit<ContextMenuState, "directoryPath"> & { directoryPath?: string }) => {
+    const nextDirectory = payload.directoryPath ?? (payload.kind === "directory" ? payload.path ?? "" : payload.path ? resolveParentDirectoryPath(payload.path) : "");
+    setContextMenu({
+      x: payload.x,
+      y: payload.y,
+      kind: payload.kind,
+      path: payload.path,
+      directoryPath: nextDirectory
+    });
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const onPointerDown = () => {
+      setContextMenu(null);
+    };
+
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [contextMenu]);
+
+  const runContextAction = useCallback(
+    async (action: "create-file" | "create-folder" | "rename" | "delete" | "move") => {
+      if (!contextMenu) {
+        return;
+      }
+
+      const targetPath = contextMenu.path;
+      const targetKind = contextMenu.kind;
+      const directoryPath = contextMenu.directoryPath;
+      closeContextMenu();
+
+      if (action === "create-file") {
+        setOperationDialog({
+          mode: "create-file",
+          directoryPath,
+          value: joinRelativePath(directoryPath, "new-note.md")
+        });
+        return;
+      }
+
+      if (action === "create-folder") {
+        setOperationDialog({
+          mode: "create-folder",
+          directoryPath,
+          value: joinRelativePath(directoryPath, "new-folder")
+        });
+        return;
+      }
+
+      if (!targetPath || targetKind === "background") {
+        return;
+      }
+
+      if (action === "rename") {
+        setOperationDialog({
+          mode: "rename",
+          path: targetPath,
+          kind: targetKind,
+          value: targetPath.split("/").pop() ?? targetPath
+        });
+        return;
+      }
+
+      if (action === "delete") {
+        setOperationDialog({
+          mode: "delete",
+          path: targetPath,
+          kind: targetKind
+        });
+        return;
+      }
+
+      if (action === "move") {
+        const defaultTarget = targetKind === "file" ? resolveParentDirectoryPath(targetPath) : "";
+        setMoveDialog({
+          path: targetPath,
+          kind: targetKind,
+          targetDirectory: defaultTarget
+        });
+      }
+    },
+    [closeContextMenu, contextMenu]
+  );
+
+  const handleSubmitOperationDialog = useCallback(async () => {
+    if (!operationDialog) {
+      return;
+    }
+
+    if (operationDialog.mode === "create-file") {
+      await handleCreateFileAt(operationDialog.value);
+      setOperationDialog(null);
+      return;
+    }
+
+    if (operationDialog.mode === "create-folder") {
+      await handleCreateFolderAt(operationDialog.value);
+      setOperationDialog(null);
+      return;
+    }
+
+    if (operationDialog.mode === "rename") {
+      await handleRenamePath(operationDialog.path, operationDialog.kind, operationDialog.value);
+      setOperationDialog(null);
+      return;
+    }
+
+    if (operationDialog.mode === "delete") {
+      await handleDeletePath(operationDialog.path, operationDialog.kind);
+      setOperationDialog(null);
+    }
+  }, [handleCreateFileAt, handleCreateFolderAt, handleDeletePath, handleRenamePath, operationDialog]);
+
+  const handleSubmitMoveDialog = useCallback(async () => {
+    if (!moveDialog) {
+      return;
+    }
+
+    await handleMovePath(moveDialog.path, moveDialog.kind, moveDialog.targetDirectory);
+    setMoveDialog(null);
+  }, [handleMovePath, moveDialog]);
+
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-zinc-950 font-mono text-zinc-200 selection:bg-indigo-500/30">
+    <div className="flex h-screen w-full overflow-hidden bg-transparent text-slate-800 selection:bg-[#dbe9ff]">
       <AgentWorkspaceSidebar
         agents={agents}
-        selectedAgent={agent}
+        currentAgentId={agent?.id ?? null}
         activeSection="workspace"
-        onSelectAgent={(nextAgent) => {
-          saveSelectedAgentId(nextAgent.id);
-          navigate(`/agents/${encodeURIComponent(nextAgent.id)}/workspace`);
-        }}
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 border-b border-zinc-800 flex items-center justify-between px-6 bg-zinc-900/30 backdrop-blur-md">
+        <header className="border-b border-slate-200 bg-white/80 px-10 py-5 backdrop-blur-md">
           <div className="min-w-0">
-            <h1 className="text-lg font-bold tracking-tight text-zinc-100">Full Workspace</h1>
-            {agent ? <p className="text-xs text-zinc-500 truncate">{agent.name}</p> : null}
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>Full Workspace</h1>
+            {agent ? <p className="text-xs text-slate-600 truncate">{agent.name}</p> : null}
           </div>
-
-          {agent ? (
-            <div className="flex items-center gap-3 text-xs text-zinc-400">
-              <span
-                className={`status-indicator ${
-                  agentStatus === "idle"
-                    ? "status-idle"
-                    : agentStatus === "busy"
-                      ? "status-busy"
-                      : agentStatus === "offline"
-                        ? "status-offline"
-                        : "status-error"
-                }`}
-              />
-              <span className="capitalize">{agentStatus}</span>
-            </div>
-          ) : null}
         </header>
 
-        <div className="flex-1 min-h-0 p-6">
+        <div className="flex-1 min-h-0 p-10">
           {isAgentLoading ? (
             <div className="space-y-3">
               <Skeleton variant="line" className="w-40" />
@@ -303,8 +737,42 @@ export function AgentWorkspaceBrowserPage() {
             <EmptyState title="Workspace unavailable" message={agentError ?? "Agent not found."} className="h-full" />
           ) : (
             <ErrorBoundary fallbackTitle="Workspace browser failed to render.">
-              <div className="h-full min-h-0 border border-zinc-800/70 rounded-lg overflow-hidden bg-zinc-950/40 flex">
-                <div className="w-80 min-w-80 border-r border-zinc-800/70 p-3 overflow-auto">
+              <div className="relative mx-auto flex h-full min-h-0 max-w-[1240px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div
+                  ref={treePanelRef}
+                  className="relative w-80 min-w-80 overflow-auto border-r border-slate-200 bg-slate-50/60 p-3"
+                  onContextMenu={(event) => {
+                    if (event.target !== event.currentTarget) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    openContextMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      kind: "background",
+                      path: null,
+                      directoryPath: ""
+                    });
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const sourcePath = event.dataTransfer.getData("application/x-openclaw-path");
+                    const sourceKind = event.dataTransfer.getData("application/x-openclaw-kind");
+                    if (!sourcePath || (sourceKind !== "file" && sourceKind !== "directory")) {
+                      return;
+                    }
+
+                    void handleMovePath(sourcePath, sourceKind, "");
+                  }}
+                >
+                  <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">Right click for actions · Drag files/folders to move</p>
+                  {fileOperationError ? <p className="mb-2 px-2 text-xs text-rose-700">{fileOperationError}</p> : null}
+
                   {isWorkspaceLoading ? (
                     <div className="space-y-2">
                       {Array.from({ length: 8 }).map((_, index) => (
@@ -316,15 +784,49 @@ export function AgentWorkspaceBrowserPage() {
                   ) : workspaceItems.length === 0 ? (
                     <EmptyState title="Workspace is empty." className="px-4 py-6" />
                   ) : (
-                    <FileTree items={workspaceItems} selectedPath={selectedPath} onSelect={handleFileSelect} />
+                    <FileTree
+                      items={workspaceItems}
+                      selectedPath={selectedPath}
+                      onSelect={handleFileSelect}
+                      onMoveRequest={({ sourcePath, sourceKind, targetDirectory }) => {
+                        void handleMovePath(sourcePath, sourceKind, targetDirectory);
+                      }}
+                      onContextMenu={(payload) => {
+                        openContextMenu({
+                          x: payload.clientX,
+                          y: payload.clientY,
+                          kind: payload.kind,
+                          path: payload.path
+                        });
+                      }}
+                    />
                   )}
+
+                  {contextMenu ? (
+                    <div
+                      className="fixed z-50 min-w-[13rem] rounded-lg border border-slate-300 bg-white p-1 shadow-xl"
+                      style={{ left: contextMenu.x, top: contextMenu.y }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-file")}>New File</button>
+                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-folder")}>New Folder</button>
+                      {contextMenu.path && contextMenu.kind !== "background" ? (
+                        <>
+                          <div className="my-1 border-t border-slate-200" />
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("rename")}>Rename</button>
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("move")}>Move to...</button>
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50" onClick={() => void runContextAction("delete")}>Delete</button>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="flex-1 min-w-0 p-4 overflow-auto">
                   {!selectedPath ? (
-                    <p className="text-xs text-zinc-500">Select a file to view content.</p>
+                    <p className="text-xs text-slate-600">Select a file to view content.</p>
                   ) : selectedPathKind === "directory" ? (
-                    <p className="text-xs text-zinc-500">Selected path is a directory.</p>
+                    <p className="text-xs text-slate-600">Selected path is a directory.</p>
                   ) : isFileLoading ? (
                     <div className="space-y-3">
                       <Skeleton variant="line" className="w-2/3" />
@@ -332,13 +834,13 @@ export function AgentWorkspaceBrowserPage() {
                       <Skeleton variant="panel" className="h-64" />
                     </div>
                   ) : selectedFileError ? (
-                    <p className="text-xs text-red-400">{selectedFileError}</p>
+                    <p className="text-xs text-rose-700">{selectedFileError}</p>
                   ) : (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-xs text-zinc-400 truncate">{selectedPath}</p>
-                          <p className="text-[10px] text-zinc-500">
+                          <p className="text-xs text-slate-600 truncate">{selectedPath}</p>
+                          <p className="text-[10px] text-slate-500">
                             {selectedFileModifiedAt ? `Modified: ${selectedFileModifiedAt}` : "Modified: unknown"}
                           </p>
                         </div>
@@ -348,7 +850,7 @@ export function AgentWorkspaceBrowserPage() {
                             <button
                               type="button"
                               onClick={handleLeaveEditor}
-                              className="px-3 py-1.5 text-xs rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
                             >
                               Back to preview
                             </button>
@@ -356,13 +858,13 @@ export function AgentWorkspaceBrowserPage() {
                             <button
                               type="button"
                               onClick={() => setIsEditingFile(true)}
-                              className="px-3 py-1.5 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-500"
+                              className="rounded-lg bg-[#1f5ba6] px-3 py-1.5 text-xs text-white hover:bg-[#174d92]"
                             >
                               Edit
                             </button>
                           )
                         ) : (
-                          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Read only</span>
+                          <span className="text-[10px] uppercase tracking-wider text-slate-500">Read only</span>
                         )}
                       </div>
 
@@ -383,6 +885,93 @@ export function AgentWorkspaceBrowserPage() {
                   )}
                 </div>
               </div>
+
+              {operationDialog ? (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/20">
+                  <div className="w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+                    {operationDialog.mode === "create-file" ? <h3 className="text-sm font-semibold text-slate-900">Create File (.md/.txt)</h3> : null}
+                    {operationDialog.mode === "create-folder" ? <h3 className="text-sm font-semibold text-slate-900">Create Folder</h3> : null}
+                    {operationDialog.mode === "rename" ? <h3 className="text-sm font-semibold text-slate-900">Rename {operationDialog.kind}</h3> : null}
+                    {operationDialog.mode === "delete" ? <h3 className="text-sm font-semibold text-slate-900">Delete {operationDialog.kind}</h3> : null}
+
+                    {operationDialog.mode === "delete" ? (
+                      <p className="mt-3 text-sm text-slate-700 break-all">
+                        {operationDialog.kind === "directory"
+                          ? `Delete folder ${operationDialog.path} and all nested files?`
+                          : `Delete file ${operationDialog.path}?`}
+                      </p>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {operationDialog.mode === "create-file" || operationDialog.mode === "create-folder"
+                            ? `Target directory: ${operationDialog.directoryPath || "/"}`
+                            : `Current path: ${operationDialog.mode === "rename" ? operationDialog.path : ""}`}
+                        </p>
+                        <input
+                          autoFocus
+                          className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800"
+                          value={operationDialog.value}
+                          onChange={(event) => setOperationDialog((current) => {
+                            if (!current || current.mode === "delete") {
+                              return current;
+                            }
+
+                            return { ...current, value: event.target.value };
+                          })}
+                        />
+                      </>
+                    )}
+
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100" onClick={() => setOperationDialog(null)}>
+                        Cancel
+                      </button>
+                      <button type="button" className="rounded-lg bg-[#1f5ba6] px-3 py-1.5 text-xs text-white hover:bg-[#174d92]" onClick={() => void handleSubmitOperationDialog()}>
+                        {operationDialog.mode === "delete" ? "Delete" : "Confirm"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {moveDialog ? (
+                <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/20">
+                  <div className="w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+                    <h3 className="text-sm font-semibold text-slate-900">Move {moveDialog.kind}</h3>
+                    <p className="mt-1 text-xs text-slate-600 truncate">{moveDialog.path}</p>
+
+                    <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" htmlFor="move-target-directory">
+                      Target Directory
+                    </label>
+                    <select
+                      id="move-target-directory"
+                      className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+                      value={moveDialog.targetDirectory}
+                      onChange={(event) => setMoveDialog((current) => (current ? { ...current, targetDirectory: event.target.value } : current))}
+                    >
+                      {directoryPaths.map((directoryPath) => (
+                        <option key={directoryPath || "root"} value={directoryPath}>
+                          {directoryPath.length > 0 ? directoryPath : "/"}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="mt-4 flex justify-end gap-2">
+                      <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100" onClick={() => setMoveDialog(null)}>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg bg-[#1f5ba6] px-3 py-1.5 text-xs text-white hover:bg-[#174d92] disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={moveDialog.targetDirectory === resolveParentDirectoryPath(moveDialog.path)}
+                        onClick={() => void handleSubmitMoveDialog()}
+                      >
+                        Move
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </ErrorBoundary>
           )}
         </div>

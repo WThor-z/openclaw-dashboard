@@ -7,17 +7,32 @@ interface SidebarProps {
   connectionStatus: string;
 }
 
-const MODULES = [
-  { id: "overview", label: "总览", icon: "📊" },
-  { id: "events", label: "事件", icon: "⚡" },
-  { id: "tasks", label: "任务", icon: "📋" },
-  { id: "approvals", label: "审批", icon: "✅" },
-  { id: "config", label: "配置", icon: "⚙️" },
-  { id: "costs", label: "成本", icon: "💰" },
-  { id: "sessions", label: "会话", icon: "💬" },
-  { id: "webhooks", label: "Webhooks", icon: "🔔" },
-  { id: "monitoring", label: "监控", icon: "📈" }
-];
+const MODULE_GROUPS = [
+  {
+    title: "Core",
+    modules: [
+      { id: "overview", label: "总览", icon: "OV" },
+      { id: "events", label: "事件", icon: "EV" },
+      { id: "tasks", label: "任务", icon: "TK" },
+      { id: "approvals", label: "审批", icon: "AP" }
+    ]
+  },
+  {
+    title: "Operations",
+    modules: [
+      { id: "config", label: "配置", icon: "CF" },
+      { id: "sessions", label: "会话", icon: "SE" },
+      { id: "webhooks", label: "Webhooks", icon: "WH" }
+    ]
+  },
+  {
+    title: "Health",
+    modules: [
+      { id: "costs", label: "成本", icon: "CO" },
+      { id: "monitoring", label: "监控", icon: "MO" }
+    ]
+  }
+] as const;
 
 export function DashboardSidebar({ activeModule, onModuleChange, connectionStatus }: SidebarProps) {
   const { signOut } = useAuth();
@@ -50,30 +65,33 @@ export function DashboardSidebar({ activeModule, onModuleChange, connectionStatu
         <div className="sidebar-header">
           <div className="sidebar-logo">
             <div className="sidebar-logo-icon">OC</div>
-            <span>OpenClaw</span>
+            <span>OpenClaw Console</span>
           </div>
         </div>
 
         <nav className="sidebar-nav">
-          <div className="sidebar-nav-section">
-            <ul className="sidebar-nav-list">
-              {MODULES.map((module) => (
-                <li key={module.id} className="sidebar-nav-item">
-                  <button
-                    className={`sidebar-nav-link ${activeModule === module.id ? 'active' : ''}`}
-                    onClick={() => {
-                      onModuleChange(module.id);
-                      setIsMobileMenuOpen(false);
-                    }}
-                    data-testid={`nav-${module.id}`}
-                  >
-                    <span className="sidebar-nav-icon">{module.icon}</span>
-                    <span>{module.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {MODULE_GROUPS.map((group) => (
+            <div className="sidebar-nav-section" key={group.title}>
+              <div className="sidebar-nav-title">{group.title}</div>
+              <ul className="sidebar-nav-list">
+                {group.modules.map((module) => (
+                  <li key={module.id} className="sidebar-nav-item">
+                    <button
+                      className={`sidebar-nav-link ${activeModule === module.id ? 'active' : ''}`}
+                      onClick={() => {
+                        onModuleChange(module.id);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      data-testid={`nav-${module.id}`}
+                    >
+                      <span className="sidebar-nav-icon" style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.08em" }}>{module.icon}</span>
+                      <span>{module.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </nav>
 
         <div className="sidebar-footer">
@@ -82,10 +100,15 @@ export function DashboardSidebar({ activeModule, onModuleChange, connectionStatu
             <div className="user-details">
               <span className="user-name">管理员</span>
               <span className="user-role" data-testid="connection-status">
-                <span className={`status-indicator ${getStatusClass()}`}>
-                  {connectionStatus === "connected" ? "connected" : 
-                   connectionStatus === "disconnected" ? "disconnected" : 
-                   connectionStatus === "loading" ? "loading" : "degraded"}
+                <span className={`status-indicator ${getStatusClass()}`} />
+                <span style={{ marginLeft: 8 }}>
+                  {connectionStatus === "connected"
+                    ? "connected"
+                    : connectionStatus === "disconnected"
+                      ? "disconnected"
+                      : connectionStatus === "loading"
+                        ? "loading"
+                        : "degraded"}
                 </span>
               </span>
             </div>
@@ -95,7 +118,7 @@ export function DashboardSidebar({ activeModule, onModuleChange, connectionStatu
             onClick={signOut}
             title="退出登录"
           >
-            🚪
+            Exit
           </button>
         </div>
       </aside>

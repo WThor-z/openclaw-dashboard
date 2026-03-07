@@ -34,41 +34,41 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
     <div
       data-testid={`agent-card-${agent.id}`}
       onClick={() => onClick(agent)}
-      className="group relative bg-zinc-900/50 border border-zinc-800 rounded-xl p-5 hover:border-indigo-500/50 hover:bg-zinc-900 transition-all cursor-pointer overflow-hidden"
+      className="group relative cursor-pointer overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#1f5ba6]/40 hover:shadow-lg"
     >
-      <div className="absolute top-0 left-0 w-1 h-full bg-transparent group-hover:bg-indigo-500 transition-colors" />
+      <div className="absolute left-0 top-0 h-full w-1 bg-transparent transition-colors group-hover:bg-[#1f5ba6]" />
       
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400 group-hover:text-indigo-400 transition-colors">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition-colors group-hover:bg-[#eaf2ff] group-hover:text-[#1f5ba6]">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
           </div>
           <div>
-            <h4 className="font-bold text-zinc-100 group-hover:text-white transition-colors">{agent.name}</h4>
-            <span className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{agent.role}</span>
+            <h4 className="font-bold text-slate-900 transition-colors group-hover:text-[#123f77]">{agent.name}</h4>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{agent.role}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className={`status-indicator ${getStatusClass(agent.status)}`} />
-          <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">{agent.status}</span>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{agent.status}</span>
         </div>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">ID</span>
-          <span className="text-zinc-300 font-mono">{agent.id.slice(0, 8)}...</span>
+          <span className="text-slate-500">ID</span>
+          <span className="font-mono text-slate-700">{agent.id.slice(0, 8)}...</span>
         </div>
         {agent.updatedAt && (
           <div className="flex items-center justify-between text-xs">
-            <span className="text-zinc-500">Last Active</span>
-            <span className="text-zinc-300">{agent.updatedAt}</span>
+            <span className="text-slate-500">Last Active</span>
+            <span className="text-slate-700">{agent.updatedAt}</span>
           </div>
         )}
       </div>
 
-      <div className="mt-4 pt-4 border-t border-zinc-800/50 flex justify-end">
-        <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="mt-4 flex justify-end border-t border-slate-200/80 pt-4">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[#1f5ba6] opacity-0 transition-opacity group-hover:opacity-100">
           View Details →
         </span>
       </div>

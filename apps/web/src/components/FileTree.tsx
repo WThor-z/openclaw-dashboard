@@ -11,9 +11,11 @@ interface FileTreeProps {
   items: WorkspaceFile[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onContextMenu?: (payload: { path: string; kind: "file" | "directory"; clientX: number; clientY: number }) => void;
+  onMoveRequest?: (payload: { sourcePath: string; sourceKind: "file" | "directory"; targetDirectory: string }) => void;
 }
 
-export function FileTree({ items, selectedPath, onSelect }: FileTreeProps) {
+export function FileTree({ items, selectedPath, onSelect, onContextMenu, onMoveRequest }: FileTreeProps) {
   // Sort: directories first, then files; both alphabetical by name
   const sortedItems = [...items].sort((a, b) => {
     if (a.kind !== b.kind) {
@@ -36,6 +38,8 @@ export function FileTree({ items, selectedPath, onSelect }: FileTreeProps) {
               item={item}
               selectedPath={selectedPath}
               onSelect={onSelect}
+              onContextMenu={onContextMenu}
+              onMoveRequest={onMoveRequest}
               depth={0}
             />
           ))}
@@ -49,11 +53,14 @@ interface FileTreeItemProps {
   item: WorkspaceFile;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onContextMenu?: (payload: { path: string; kind: "file" | "directory"; clientX: number; clientY: number }) => void;
+  onMoveRequest?: (payload: { sourcePath: string; sourceKind: "file" | "directory"; targetDirectory: string }) => void;
   depth: number;
 }
 
-function FileTreeItem({ item, selectedPath, onSelect, depth }: FileTreeItemProps) {
+function FileTreeItem({ item, selectedPath, onSelect, onContextMenu, onMoveRequest, depth }: FileTreeItemProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isDropTarget, setIsDropTarget] = useState(false);
   const isSelected = selectedPath === item.path;
   const isDirectory = item.kind === "directory";
 
@@ -71,6 +78,17 @@ function FileTreeItem({ item, selectedPath, onSelect, depth }: FileTreeItemProps
     onSelect(item.path);
   };
 
+  const handleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    onSelect(item.path);
+    onContextMenu?.({
+      path: item.path,
+      kind: item.kind,
+      clientX: event.clientX,
+      clientY: event.clientY
+    });
+  };
+
   const sortedChildren = isDirectory && item.children
     ? [...item.children].sort((a, b) => {
         if (a.kind !== b.kind) {
@@ -80,11 +98,61 @@ function FileTreeItem({ item, selectedPath, onSelect, depth }: FileTreeItemProps
       })
     : [];
 
+  const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    event.dataTransfer.setData("application/x-openclaw-path", item.path);
+    event.dataTransfer.setData("application/x-openclaw-kind", item.kind);
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isDirectory) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setIsDropTarget(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDropTarget(false);
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isDirectory) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDropTarget(false);
+    const sourcePath = event.dataTransfer.getData("application/x-openclaw-path");
+    const sourceKind = event.dataTransfer.getData("application/x-openclaw-kind");
+    if (!sourcePath || (sourceKind !== "file" && sourceKind !== "directory")) {
+      return;
+    }
+
+    if (sourcePath === item.path) {
+      return;
+    }
+
+    onMoveRequest?.({
+      sourcePath,
+      sourceKind,
+      targetDirectory: item.path
+    });
+  };
+
   return (
     <li className="file-tree-item" style={{ display: "block" }}>
       <div
         className={`file-tree-row ${isSelected ? "active" : ""}`}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         style={{
           display: "flex",
           alignItems: "center",
@@ -92,7 +160,7 @@ function FileTreeItem({ item, selectedPath, onSelect, depth }: FileTreeItemProps
           paddingLeft: `calc(var(--space-2) + ${depth * 1.2}rem)`,
           cursor: "pointer",
           borderRadius: "var(--radius-sm)",
-          backgroundColor: isSelected ? "var(--color-brand-50)" : "transparent",
+          backgroundColor: isDropTarget ? "var(--color-bg-hover)" : isSelected ? "var(--color-brand-50)" : "transparent",
           color: isSelected ? "var(--color-brand-600)" : "inherit",
           transition: "background-color var(--transition-fast)",
         }}
@@ -138,6 +206,8 @@ function FileTreeItem({ item, selectedPath, onSelect, depth }: FileTreeItemProps
                 item={child}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
+                onContextMenu={onContextMenu}
+                onMoveRequest={onMoveRequest}
                 depth={depth + 1}
               />
             ))

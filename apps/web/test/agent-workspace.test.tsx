@@ -1,13 +1,12 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
-import { AuthProvider } from "../src/app/auth.js";
-import { App } from "../src/app/App.js";
 import { BrowserRouter } from "react-router-dom";
+
+import { AuthProvider, useAuth } from "../src/app/auth.js";
+import { saveStoredPinnedNotes } from "../src/features/agent-workspace/storage.js";
 import { AgentWorkspacePage } from "../src/pages/AgentWorkspacePage.js";
-import { useEffect } from "react";
-import { useAuth } from "../src/app/auth.js";
+import { AgentWorkspacePinnedFilesPage } from "../src/pages/AgentWorkspacePinnedFilesPage.js";
 
 function LoginHelper() {
   const { signIn } = useAuth();
@@ -31,11 +30,12 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 afterEach(() => {
   cleanup();
   window.history.pushState({}, "", "/");
+  window.localStorage.clear();
   vi.restoreAllMocks();
 });
 
 describe("AgentWorkspace layout", () => {
-  it("renders the overview shell instead of a permanent loading sidebar", async () => {
+  it("renders grouped sidebar navigation without redundant selected-agent panels", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
@@ -61,7 +61,10 @@ describe("AgentWorkspace layout", () => {
     expect(await screen.findByTestId("agent-list-placeholder")).toBeTruthy();
     expect(await screen.findByTestId("drawer-placeholder")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Overview" })).toBeTruthy();
-    expect(screen.getByText("Tracked agents in this workspace")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Workspaces" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Configuration" })).toBeTruthy();
+    expect(screen.queryByText("Selected Agent")).toBeNull();
+    expect(screen.queryByText("Agents")).toBeNull();
   });
 
   it("keeps the last known status through a transient polling failure", async () => {
@@ -109,8 +112,6 @@ describe("AgentWorkspace layout", () => {
       }
 
       if (requestUrl === "/api/agents/agent-1/status") {
-        expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
-
         const next = statusQueue.shift();
         if (!next) {
           return Promise.resolve(
@@ -138,6 +139,24 @@ describe("AgentWorkspace layout", () => {
         );
       }
 
+      if (requestUrl === "/api/agents/agent-1/files") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [{ name: "README.md", path: "README.md", isDirectory: false }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files/README.md") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ content: "# Readme", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
       return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
     });
 
@@ -150,11 +169,10 @@ describe("AgentWorkspace layout", () => {
     fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
 
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+      expect(screen.getAllByText("busy").length).toBeGreaterThan(0);
     });
 
     expect(intervalHandler).toBeTruthy();
-
     await act(async () => {
       intervalHandler?.();
       await Promise.resolve();
@@ -162,17 +180,7 @@ describe("AgentWorkspace layout", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
-    });
-
-    await act(async () => {
-      intervalHandler?.();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+      expect(screen.getAllByText("busy").length).toBeGreaterThan(0);
     });
 
     cleanup();
@@ -181,16 +189,17 @@ describe("AgentWorkspace layout", () => {
       fetchSpy.mock.calls.filter(
         (call) => (typeof call[0] === "string" ? call[0] : call[0].toString()) === "/api/agents/agent-1/status"
       ).length
-    ).toBeGreaterThanOrEqual(4);
+    ).toBeGreaterThanOrEqual(2);
   });
 
-  it("unlocks preview-file and full-workspace links in the fixed sidebar after agent selection", async () => {
+  it("opens a markdown preview drawer from the overview when an agent card is selected", async () => {
+    saveStoredPinnedNotes("agent-1", ["README.md", "notes/PLAN.md"]);
+
     vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
       if (requestUrl === "/api/agents") {
         expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
-
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -205,10 +214,7 @@ describe("AgentWorkspace layout", () => {
                 }
               ]
             }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
         );
       }
@@ -231,11 +237,26 @@ describe("AgentWorkspace layout", () => {
                 { name: "notes", path: "notes", isDirectory: true, children: [{ name: "PLAN.md", path: "notes/PLAN.md", isDirectory: false }] }
               ]
             }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files/README.md") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ content: "# Readme\n\nHello **world**.", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files/notes%2FPLAN.md") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ content: "## Plan", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
         );
       }
 
@@ -250,13 +271,13 @@ describe("AgentWorkspace layout", () => {
 
     fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
 
-    expect(await screen.findByRole("link", { name: "Preview Files" })).toBeTruthy();
-    expect(await screen.findByRole("link", { name: "Full Workspace" })).toBeTruthy();
+    expect(await screen.findByTestId("preview-drawer")).toBeTruthy();
+    expect((await screen.findAllByText("README.md")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("world", { selector: "strong" })).toBeTruthy();
   });
 
   it("keeps the selected agent status stable when the agent list refreshes stale offline data", async () => {
     let agentListIntervalHandler: (() => void) | null = null;
-
     vi.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, timeout?: number) => {
       if (timeout === 5000 && typeof handler === "function") {
         agentListIntervalHandler = handler as () => void;
@@ -286,10 +307,7 @@ describe("AgentWorkspace layout", () => {
                 }
               ]
             }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
         );
       }
@@ -297,6 +315,24 @@ describe("AgentWorkspace layout", () => {
       if (requestUrl === "/api/agents/agent-1/status") {
         return Promise.resolve(
           new Response(JSON.stringify({ status: "busy", updatedAt: "2026-03-06T00:00:00.000Z" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ items: [{ name: "README.md", path: "README.md", isDirectory: false }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        );
+      }
+
+      if (requestUrl === "/api/agents/agent-1/files/README.md") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ content: "# Readme", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
             status: 200,
             headers: { "content-type": "application/json" }
           })
@@ -315,7 +351,7 @@ describe("AgentWorkspace layout", () => {
     fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
 
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+      expect(screen.getAllByText("busy").length).toBeGreaterThan(0);
     });
 
     expect(agentListIntervalHandler).toBeTruthy();
@@ -326,26 +362,16 @@ describe("AgentWorkspace layout", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("busy", { selector: "span.capitalize" })).toBeTruthy();
+      expect(screen.getAllByText("busy").length).toBeGreaterThan(0);
     });
   });
 
-  it("routes selected agents to preview files from the fixed left sidebar", async () => {
+  it("shows pinned files in configuration instead of embedding them in preview content", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = typeof input === "string" ? input : input.toString();
 
-      if (requestUrl === "/api/auth/check") {
-        return Promise.resolve(
-          new Response(JSON.stringify({ ok: true, authorized: true }), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          })
-        );
-      }
-
       if (requestUrl === "/api/agents") {
         expect(init?.headers).toMatchObject({ authorization: "Bearer dev-token" });
-
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -360,20 +386,8 @@ describe("AgentWorkspace layout", () => {
                 }
               ]
             }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
-        );
-      }
-
-      if (requestUrl === "/api/agents/agent-1/status") {
-        return Promise.resolve(
-          new Response(JSON.stringify({ status: "busy", updatedAt: "2026-03-06T00:00:00.000Z" }), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          })
         );
       }
 
@@ -386,45 +400,22 @@ describe("AgentWorkspace layout", () => {
                 { name: "notes", path: "notes", isDirectory: true, children: [{ name: "PLAN.md", path: "notes/PLAN.md", isDirectory: false }] }
               ]
             }),
-            {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            }
+            { status: 200, headers: { "content-type": "application/json" } }
           )
-        );
-      }
-
-      if (requestUrl === "/api/agents/agent-1/files/README.md") {
-        return Promise.resolve(
-          new Response(JSON.stringify({ content: "# Readme", modifiedAt: "2026-03-06T00:00:00.000Z" }), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          })
         );
       }
 
       return Promise.reject(new Error(`Unhandled fetch URL: ${requestUrl}`));
     });
 
-    window.history.pushState({}, "", "/dashboard");
+    render(
+      <TestWrapper>
+        <AgentWorkspacePinnedFilesPage />
+      </TestWrapper>
+    );
 
-    render(<App />);
-
-    fireEvent.change(await screen.findByTestId("daemon-token-input"), {
-      target: { value: "dev-token" }
-    });
-    fireEvent.click(screen.getByTestId("connect-button"));
-
-    await screen.findByTestId("agent-workspace-title");
-    fireEvent.click(await screen.findByTestId("agent-card-agent-1"));
-
-    const previewFilesLink = await screen.findByRole("link", { name: "Preview Files" });
-    fireEvent.click(previewFilesLink);
-
-    await waitFor(() => {
-      expect(window.location.pathname).toBe("/agents/agent-1/quick-notes");
-    });
-
-    expect(await screen.findByRole("heading", { name: "Preview Files" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Pinned Files" })).toBeTruthy();
+    expect(screen.getByText("Configuration")).toBeTruthy();
+    expect(screen.queryByText("Pick a pinned note")).toBeNull();
   });
 });

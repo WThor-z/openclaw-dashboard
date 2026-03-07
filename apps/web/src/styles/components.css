@@ -325,50 +325,104 @@
 
 /* Dark theme bridge for common Tailwind utility colors */
 [data-theme="dark"] .bg-white {
-  background-color: #1a2433;
+  background-color: #1c2835 !important;
 }
 
 [data-theme="dark"] .bg-white\/80 {
-  background-color: rgb(24 34 48 / 0.86);
+  background-color: rgb(25 36 49 / 0.9) !important;
+}
+
+[data-theme="dark"] .bg-white\/95 {
+  background-color: rgb(28 40 53 / 0.96) !important;
 }
 
 [data-theme="dark"] .bg-slate-50,
 [data-theme="dark"] .bg-slate-50\/60,
 [data-theme="dark"] .bg-slate-50\/70 {
-  background-color: #1d2a3c;
+  background-color: #202d3d !important;
 }
 
 [data-theme="dark"] .text-slate-900 {
-  color: #e7eef8;
+  color: #e4ecf7 !important;
 }
 
 [data-theme="dark"] .text-slate-800 {
-  color: #d8e3f2;
+  color: #d6e2f1 !important;
 }
 
 [data-theme="dark"] .text-slate-700 {
-  color: #c3d2e5;
+  color: #c3d2e3 !important;
 }
 
 [data-theme="dark"] .text-slate-600,
 [data-theme="dark"] .text-slate-500 {
-  color: #9db0c7;
+  color: #9bb0c7 !important;
 }
 
 [data-theme="dark"] .border-slate-300,
 [data-theme="dark"] .border-slate-200,
 [data-theme="dark"] .border-slate-100 {
-  border-color: #2c3e54;
+  border-color: #304257 !important;
+}
+
+[data-theme="dark"] .border-slate-200\/90,
+[data-theme="dark"] .border-slate-200\/80,
+[data-theme="dark"] .border-slate-200\/70 {
+  border-color: rgb(48 66 87 / 0.84) !important;
 }
 
 [data-theme="dark"] .hover\:bg-slate-50:hover,
 [data-theme="dark"] .hover\:bg-slate-100:hover {
-  background-color: #233449;
+  background-color: #2a3a4d !important;
 }
 
 [data-theme="dark"] .bg-slate-900\/10,
 [data-theme="dark"] .bg-slate-900\/20 {
-  background-color: rgb(5 8 12 / 0.45);
+  background-color: rgb(5 8 12 / 0.5) !important;
+}
+
+[data-theme="dark"] .shadow-sm,
+[data-theme="dark"] .shadow-lg,
+[data-theme="dark"] .shadow-xl {
+  box-shadow: 0 14px 32px rgb(2 6 11 / 0.42) !important;
+}
+
+[data-theme="dark"] .markdown-reader {
+  border-color: #314358;
+  background: linear-gradient(180deg, #202d3d 0%, #1b2736 100%);
+  color: #d7e4f3;
+}
+
+[data-theme="dark"] .markdown-frontmatter {
+  border-color: #37506a;
+  background: #1f2f42;
+}
+
+[data-theme="dark"] .markdown-frontmatter-title,
+[data-theme="dark"] .markdown-h1,
+[data-theme="dark"] .markdown-h2,
+[data-theme="dark"] .markdown-h3 {
+  color: #e8f0fb;
+}
+
+[data-theme="dark"] .markdown-h2 {
+  border-top-color: #30445b;
+}
+
+[data-theme="dark"] .markdown-p,
+[data-theme="dark"] .markdown-li,
+[data-theme="dark"] .markdown-reader a,
+[data-theme="dark"] .markdown-quote,
+[data-theme="dark"] .markdown-table th,
+[data-theme="dark"] .markdown-table td {
+  color: #bfd0e3;
+}
+
+[data-theme="dark"] .markdown-code-inline,
+[data-theme="dark"] .markdown-code-block {
+  background: #152131;
+  border-color: #2b4055;
+  color: #dce9f7;
 }
 
 /* Lists */

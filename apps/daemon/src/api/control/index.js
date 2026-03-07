@@ -3,7 +3,14 @@ import { randomUUID } from "node:crypto";
 import { HttpError, sendJson } from "../../middleware/error-handler.js";
 import { createMonitorProvidersFromEnv } from "../../monitoring/collectors.js";
 import { redactSecrets } from "../read/redaction.js";
-import { writeAgentFile } from "./agents.js";
+import {
+  createAgentFolder,
+  deleteAgentFile,
+  deleteWorkspacePath,
+  moveWorkspacePath,
+  renameWorkspacePath,
+  writeAgentFile
+} from "./agents.js";
 import {
   normalizeAndValidateWebhookEndpoint,
   WebhookEndpointPolicyError
@@ -355,7 +362,7 @@ export function createControlApiRouter({
     }
   }
 
-  function resolveAgentFileWriteRoute(pathname) {
+  function resolveAgentFileMutationRoute(pathname) {
     const prefix = "/api/control/agents/";
     if (!pathname.startsWith(prefix)) {
       return null;
@@ -374,11 +381,27 @@ export function createControlApiRouter({
     const encodedAgentId = suffix.slice(0, firstSlash);
     const remainder = suffix.slice(firstSlash + 1);
 
+    if (remainder === "files/delete" || remainder === "files/create") {
+      return null;
+    }
+
     if (!remainder.startsWith("files/")) {
+      return null;
+    }
+
+    const fileSuffix = remainder.slice("files/".length);
+    if (!fileSuffix) {
       throw new HttpError(404, "NOT_FOUND", "Route not found");
     }
 
-    const encodedFilePath = remainder.slice("files/".length);
+    let action = "write";
+    let encodedFilePath = fileSuffix;
+
+    if (fileSuffix.endsWith("/delete")) {
+      action = "delete";
+      encodedFilePath = fileSuffix.slice(0, -"/delete".length);
+    }
+
     if (!encodedFilePath) {
       throw new HttpError(404, "NOT_FOUND", "Route not found");
     }
@@ -390,8 +413,87 @@ export function createControlApiRouter({
 
     return {
       agentId,
-      filePath: decodePathOrThrow(encodedFilePath)
+      filePath: decodePathOrThrow(encodedFilePath),
+      action
     };
+  }
+
+  function resolveAgentFileDeleteByBodyRoute(pathname) {
+    const prefix = "/api/control/agents/";
+    if (!pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const suffix = pathname.slice(prefix.length);
+    if (!suffix) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const firstSlash = suffix.indexOf("/");
+    if (firstSlash <= 0) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const encodedAgentId = suffix.slice(0, firstSlash);
+    const remainder = suffix.slice(firstSlash + 1);
+    if (remainder !== "files/delete") {
+      return null;
+    }
+
+    const agentId = decodePathOrThrow(encodedAgentId);
+    if (!agentId) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    return {
+      agentId
+    };
+  }
+
+  function resolveAgentWorkspacePathOperationRoute(pathname) {
+    const prefix = "/api/control/agents/";
+    if (!pathname.startsWith(prefix)) {
+      return null;
+    }
+
+    const suffix = pathname.slice(prefix.length);
+    if (!suffix) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const firstSlash = suffix.indexOf("/");
+    if (firstSlash <= 0) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    const encodedAgentId = suffix.slice(0, firstSlash);
+    const remainder = suffix.slice(firstSlash + 1);
+    const agentId = decodePathOrThrow(encodedAgentId);
+    if (!agentId) {
+      throw new HttpError(404, "NOT_FOUND", "Route not found");
+    }
+
+    if (remainder === "files/create") {
+      return { agentId, action: "file.create" };
+    }
+
+    if (remainder === "folders/create") {
+      return { agentId, action: "folder.create" };
+    }
+
+    if (remainder === "paths/rename") {
+      return { agentId, action: "path.rename" };
+    }
+
+    if (remainder === "paths/delete") {
+      return { agentId, action: "path.delete" };
+    }
+
+    if (remainder === "paths/move") {
+      return { agentId, action: "path.move" };
+    }
+
+    return null;
   }
 
   async function normalizeEndpointOrThrow(endpointUrl) {
@@ -708,34 +810,244 @@ export function createControlApiRouter({
         }
       }
 
-      const agentFileRoute = resolveAgentFileWriteRoute(pathname);
+      const agentFileRoute = resolveAgentFileMutationRoute(pathname);
       if (agentFileRoute !== null) {
+        const mutationKind = agentFileRoute.action === "delete" ? "delete" : "write";
         await handleMutation(
           req,
           res,
           pathname,
-          `control.agents.files.write:${agentFileRoute.agentId}:${agentFileRoute.filePath}`,
+          `control.agents.files.${mutationKind}:${agentFileRoute.agentId}:${agentFileRoute.filePath}`,
           async (body) => {
-            const result = await writeAgentFile({
-              body,
-              monitorProviders,
-              agentId: agentFileRoute.agentId,
-              requestedPath: agentFileRoute.filePath
-            });
+            const result =
+              agentFileRoute.action === "delete"
+                ? await deleteAgentFile({
+                  monitorProviders,
+                  agentId: agentFileRoute.agentId,
+                  requestedPath: agentFileRoute.filePath
+                })
+                : await writeAgentFile({
+                  body,
+                  monitorProviders,
+                  agentId: agentFileRoute.agentId,
+                  requestedPath: agentFileRoute.filePath
+                });
 
             return {
               status: 200,
               body: {
                 ok: true,
                 path: result.path,
-                modifiedAt: result.modifiedAt
+                ...("modifiedAt" in result ? { modifiedAt: result.modifiedAt } : {})
               },
               workspaceId: result.workspaceId,
-              kind: "control.agents.files.write"
+              kind: `control.agents.files.${mutationKind}`
             };
           }
         );
         return true;
+      }
+
+      const deleteByBodyRoute = resolveAgentFileDeleteByBodyRoute(pathname);
+      if (deleteByBodyRoute !== null) {
+        await handleMutation(
+          req,
+          res,
+          pathname,
+          `control.agents.files.deleteByBody:${deleteByBodyRoute.agentId}`,
+          async (body) => {
+            if (typeof body.path !== "string") {
+              throw new HttpError(400, "INVALID_BODY", "path must be a UTF-8 string");
+            }
+
+            const result = await deleteAgentFile({
+              monitorProviders,
+              agentId: deleteByBodyRoute.agentId,
+              requestedPath: body.path
+            });
+
+            return {
+              status: 200,
+              body: {
+                ok: true,
+                path: result.path
+              },
+              workspaceId: result.workspaceId,
+              kind: "control.agents.files.delete"
+            };
+          }
+        );
+        return true;
+      }
+
+      const pathOperationRoute = resolveAgentWorkspacePathOperationRoute(pathname);
+      if (pathOperationRoute !== null) {
+        if (pathOperationRoute.action === "file.create") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.agents.paths.file.create:${pathOperationRoute.agentId}`,
+            async (body) => {
+              if (typeof body.path !== "string") {
+                throw new HttpError(400, "INVALID_BODY", "path must be a UTF-8 string");
+              }
+
+              const result = await writeAgentFile({
+                body: {
+                  content: typeof body.content === "string" ? body.content : ""
+                },
+                monitorProviders,
+                agentId: pathOperationRoute.agentId,
+                requestedPath: body.path
+              });
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  path: result.path,
+                  modifiedAt: result.modifiedAt
+                },
+                workspaceId: result.workspaceId,
+                kind: "control.agents.files.write"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (pathOperationRoute.action === "folder.create") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.agents.paths.folder.create:${pathOperationRoute.agentId}`,
+            async (body) => {
+              if (typeof body.path !== "string") {
+                throw new HttpError(400, "INVALID_BODY", "path must be a UTF-8 string");
+              }
+
+              const result = await createAgentFolder({
+                monitorProviders,
+                agentId: pathOperationRoute.agentId,
+                requestedPath: body.path
+              });
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  path: result.path
+                },
+                workspaceId: result.workspaceId,
+                kind: "control.agents.folders.create"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (pathOperationRoute.action === "path.rename") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.agents.paths.rename:${pathOperationRoute.agentId}`,
+            async (body) => {
+              if (typeof body.path !== "string" || typeof body.nextPath !== "string") {
+                throw new HttpError(400, "INVALID_BODY", "path and nextPath must be UTF-8 strings");
+              }
+
+              const result = await renameWorkspacePath({
+                monitorProviders,
+                agentId: pathOperationRoute.agentId,
+                sourcePath: body.path,
+                targetPath: body.nextPath
+              });
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  path: result.path,
+                  nextPath: result.nextPath,
+                  isDirectory: result.isDirectory
+                },
+                workspaceId: result.workspaceId,
+                kind: "control.agents.paths.rename"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (pathOperationRoute.action === "path.delete") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.agents.paths.delete:${pathOperationRoute.agentId}`,
+            async (body) => {
+              if (typeof body.path !== "string") {
+                throw new HttpError(400, "INVALID_BODY", "path must be a UTF-8 string");
+              }
+
+              const result = await deleteWorkspacePath({
+                monitorProviders,
+                agentId: pathOperationRoute.agentId,
+                requestedPath: body.path,
+                recursive: parseBoolean(body.recursive, false)
+              });
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  path: result.path,
+                  isDirectory: result.isDirectory
+                },
+                workspaceId: result.workspaceId,
+                kind: "control.agents.paths.delete"
+              };
+            }
+          );
+          return true;
+        }
+
+        if (pathOperationRoute.action === "path.move") {
+          await handleMutation(
+            req,
+            res,
+            pathname,
+            `control.agents.paths.move:${pathOperationRoute.agentId}`,
+            async (body) => {
+              if (typeof body.path !== "string" || typeof body.targetDirectory !== "string") {
+                throw new HttpError(400, "INVALID_BODY", "path and targetDirectory must be UTF-8 strings");
+              }
+
+              const result = await moveWorkspacePath({
+                monitorProviders,
+                agentId: pathOperationRoute.agentId,
+                sourcePath: body.path,
+                targetDirectory: body.targetDirectory
+              });
+
+              return {
+                status: 200,
+                body: {
+                  ok: true,
+                  path: result.path,
+                  nextPath: result.nextPath,
+                  isDirectory: result.isDirectory
+                },
+                workspaceId: result.workspaceId,
+                kind: "control.agents.paths.move"
+              };
+            }
+          );
+          return true;
+        }
       }
 
       if (pathname === "/api/control/config/diff") {

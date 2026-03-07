@@ -59,6 +59,14 @@ export function App() {
                 <AgentWorkspacePinnedFilesPage />
               </ProtectedRoute>
             }
+            path="/agents/:agentId/pinned-files"
+          />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AgentWorkspacePinnedFilesPage />
+              </ProtectedRoute>
+            }
             path="/agents/:agentId/quick-notes"
           />
           <Route element={<RootRedirect />} path="*" />

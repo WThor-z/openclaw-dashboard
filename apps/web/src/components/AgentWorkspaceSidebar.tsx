@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { LanguageSwitch, useI18n } from "../app/i18n.js";
 import { type Agent } from "./AgentCard.js";
 
 type AgentWorkspaceSidebarProps = {
@@ -22,30 +23,34 @@ function itemClass(active: boolean) {
 }
 
 export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }: AgentWorkspaceSidebarProps) {
+  const { t } = useI18n();
   const [workspacesOpen, setWorkspacesOpen] = useState(true);
   const [configurationOpen, setConfigurationOpen] = useState(true);
 
   return (
     <aside className="hidden w-80 shrink-0 border-r border-slate-200 bg-gradient-to-b from-[#fcfdff] to-[#f4f7fb] p-6 lg:flex lg:flex-col lg:gap-5">
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">Workspace</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">{t("workspace.sidebar.section")}</p>
         <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900">Agent Workspace</h2>
+        <div className="mt-4">
+          <LanguageSwitch />
+        </div>
       </div>
 
       <nav className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3">
-          <Link aria-label="Overview" to="/dashboard" className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${linkClass(activeSection === "overview")}`}>
-            Overview
+          <Link aria-label={t("workspace.sidebar.overview")} to="/dashboard" className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors ${linkClass(activeSection === "overview")}`}>
+            {t("workspace.sidebar.overview")}
           </Link>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50/70">
             <button
               type="button"
-              aria-label="Workspaces"
+              aria-label={t("workspace.sidebar.workspaces")}
               onClick={() => setWorkspacesOpen((value) => !value)}
               className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-slate-900"
             >
-              <span>Workspaces</span>
+              <span>{t("workspace.sidebar.workspaces")}</span>
               <span className="text-xs text-slate-500">{workspacesOpen ? "-" : "+"}</span>
             </button>
             {workspacesOpen ? (
@@ -62,7 +67,7 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
                     </Link>
                   ))
                 ) : (
-                  <p className="px-2 py-1 text-xs text-slate-500">No workspaces yet.</p>
+                  <p className="px-2 py-1 text-xs text-slate-500">{t("workspace.sidebar.noWorkspaces")}</p>
                 )}
               </div>
             ) : null}
@@ -71,11 +76,11 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
           <div className="rounded-xl border border-slate-200 bg-slate-50/70">
             <button
               type="button"
-              aria-label="Configuration"
+              aria-label={t("workspace.sidebar.configuration")}
               onClick={() => setConfigurationOpen((value) => !value)}
               className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-slate-900"
             >
-              <span>Configuration</span>
+              <span>{t("workspace.sidebar.configuration")}</span>
               <span className="text-xs text-slate-500">{configurationOpen ? "-" : "+"}</span>
             </button>
             {configurationOpen ? (
@@ -87,12 +92,12 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
                       to={`/agents/${encodeURIComponent(agent.id)}/pinned-files`}
                       className={`rounded-xl border px-3 py-3 text-sm transition-colors ${itemClass(activeSection === "pinned-files" && currentAgentId === agent.id)}`}
                     >
-                      <p className="font-semibold">Pinned Files · {agent.name}</p>
+                      <p className="font-semibold">{t("workspace.sidebar.pinnedFiles")} · {agent.name}</p>
                       <p className="mt-1 text-[11px] uppercase tracking-[0.25em] text-slate-500">{agent.role}</p>
                     </Link>
                   ))
                 ) : (
-                  <p className="px-2 py-1 text-xs text-slate-500">No agents available for pinned-file configuration.</p>
+                  <p className="px-2 py-1 text-xs text-slate-500">{t("workspace.sidebar.noAgentsForPinned")}</p>
                 )}
               </div>
             ) : null}

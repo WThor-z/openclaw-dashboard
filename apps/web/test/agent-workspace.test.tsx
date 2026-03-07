@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "../src/app/auth.js";
 import { I18nProvider } from "../src/app/i18n.js";
+import { ThemeProvider } from "../src/app/theme.js";
 import { saveStoredPinnedNotes } from "../src/features/agent-workspace/storage.js";
 import { AgentWorkspacePage } from "../src/pages/AgentWorkspacePage.js";
 import { AgentWorkspacePinnedFilesPage } from "../src/pages/AgentWorkspacePinnedFilesPage.js";
@@ -20,12 +21,14 @@ function LoginHelper() {
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <I18nProvider>
-        <BrowserRouter>
-          <LoginHelper />
-          {children}
-        </BrowserRouter>
-      </I18nProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <BrowserRouter>
+            <LoginHelper />
+            {children}
+          </BrowserRouter>
+        </I18nProvider>
+      </ThemeProvider>
     </AuthProvider>
   );
 }

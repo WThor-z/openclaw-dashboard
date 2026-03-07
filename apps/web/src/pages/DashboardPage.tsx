@@ -19,6 +19,18 @@ import { TasksPanel, type TaskItem } from "../features/tasks/TasksPanel.js";
 import { MonitoringPanel } from "../features/monitoring/MonitoringPanel.js";
 import { WebhookCenterPanel } from "../features/webhooks/WebhookCenterPanel.js";
 
+const MODULE_META: Record<string, { title: string; subtitle: string; category: string }> = {
+  overview: { title: "控制面板", subtitle: "在一个画布中查看关键状态、任务和审批。", category: "Core" },
+  events: { title: "事件管理", subtitle: "追踪关键事件并快速定位来源与级别。", category: "Core" },
+  tasks: { title: "任务队列", subtitle: "关注执行状态并处理待运行任务。", category: "Core" },
+  approvals: { title: "审批中心", subtitle: "集中处理人工审批与失败重试。", category: "Core" },
+  config: { title: "配置中心", subtitle: "预览配置差异并安全发布到运行环境。", category: "Operations" },
+  costs: { title: "成本分析", subtitle: "观察成本趋势并判断优化窗口。", category: "Health" },
+  sessions: { title: "会话探索", subtitle: "检索会话并下钻到详细时间线。", category: "Operations" },
+  webhooks: { title: "Webhook 管理", subtitle: "管理 webhook 状态与投递入口。", category: "Operations" },
+  monitoring: { title: "系统监控", subtitle: "查看核心健康指标并发现异常信号。", category: "Health" }
+};
+
 function createIdempotencyKey(seed: string) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${seed}-${crypto.randomUUID()}`;
@@ -74,6 +86,8 @@ export function DashboardPage() {
   const [failedApprovalIds, setFailedApprovalIds] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [submittingApprovalId, setSubmittingApprovalId] = useState<string | null>(null);
+
+  const activeModuleMeta = MODULE_META[activeModule] ?? MODULE_META.overview;
 
   const configDraftKey = useMemo(
     () => `${configModelValue}::${configTemperatureValue}`,
@@ -576,17 +590,11 @@ export function DashboardPage() {
       <main className="dashboard-main">
         <header className="dashboard-header">
           <div className="header-left">
-            <h1 className="header-title">
-              {activeModule === "overview" ? "控制面板" :
-               activeModule === "events" ? "事件管理" :
-               activeModule === "tasks" ? "任务队列" :
-               activeModule === "approvals" ? "审批中心" :
-               activeModule === "config" ? "配置中心" :
-               activeModule === "costs" ? "成本分析" :
-               activeModule === "sessions" ? "会话探索" :
-               activeModule === "webhooks" ? "Webhook 管理" :
-               activeModule === "monitoring" ? "系统监控" : "控制面板"}
-            </h1>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">{activeModuleMeta.category}</p>
+              <h1 className="header-title">{activeModuleMeta.title}</h1>
+              <p className="text-xs text-slate-600">{activeModuleMeta.subtitle}</p>
+            </div>
           </div>
           <div className="header-actions">
             {lastUpdate && (
@@ -598,22 +606,24 @@ export function DashboardPage() {
         </header>
         
         <div className="dashboard-content">
-          {statusMessage && (
-            <div 
-              className={`alert ${statusMessage.includes("失败") ? "alert-error" : "alert-success"}`}
-              role="status"
-            >
-              {statusMessage}
-              <button 
-                className="btn btn-ghost btn-sm" 
-                onClick={() => setStatusMessage(null)}
-                style={{ marginLeft: "auto" }}
+          <div className="dashboard-content-inner dashboard-module-stack">
+            {statusMessage && (
+              <div
+                className={`alert ${statusMessage.includes("失败") ? "alert-error" : "alert-success"}`}
+                role="status"
               >
-                ✕
-              </button>
-            </div>
-          )}
-          {renderModuleContent()}
+                {statusMessage}
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setStatusMessage(null)}
+                  style={{ marginLeft: "auto" }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            {renderModuleContent()}
+          </div>
         </div>
       </main>
     </div>

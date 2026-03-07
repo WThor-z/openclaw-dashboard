@@ -94,8 +94,8 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
   const [pinnedFilesOpen, setPinnedFilesOpen] = useState(true);
 
   return (
-    <aside className="hidden w-[17.5rem] shrink-0 border-r border-slate-200 bg-gradient-to-b from-[#fcfdff] to-[#f4f7fb] p-4 lg:flex lg:flex-col lg:gap-3.5">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <aside className="agent-workspace-sidebar hidden w-[17.5rem] shrink-0 border-r border-slate-200 bg-gradient-to-b from-[#fcfdff] to-[#f4f7fb] p-4 lg:flex lg:flex-col lg:gap-3.5">
+      <div className="agent-workspace-sidebar-card rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-[#1f5ba6]">{t("workspace.sidebar.section")}</p>
         <h2 className="mt-2 text-xl font-bold tracking-tight text-slate-900">Agent Workspace</h2>
         <div className="sidebar-lang-switch mt-3">
@@ -104,7 +104,7 @@ export function AgentWorkspaceSidebar({ agents, currentAgentId, activeSection }:
         </div>
       </div>
 
-      <nav className="rounded-2xl border border-slate-200 bg-white px-2.5 py-3 shadow-sm">
+      <nav className="agent-workspace-sidebar-nav rounded-2xl border border-slate-200 bg-white px-2.5 py-3 shadow-sm">
         <div className="grid gap-1.5">
           <Link aria-label={t("workspace.sidebar.overview")} to="/dashboard" className={`flex min-h-[2.2rem] items-center rounded-lg border px-2.5 py-2 text-[13px] font-semibold transition-all duration-200 hover:translate-x-[1px] ${linkClass(activeSection === "overview")}`}>
             <NodeGlyph kind="overview" />

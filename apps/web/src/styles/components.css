@@ -263,6 +263,12 @@
   color: #123f77;
 }
 
+.sidebar-lang-switch .language-switch-button {
+  min-width: 50px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 /* Lists */
 .list {
   list-style: none;

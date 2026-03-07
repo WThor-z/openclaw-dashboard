@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../app/auth.js";
+import { useI18n } from "../app/i18n.js";
 import { type Agent } from "../components/AgentCard.js";
 import { AgentWorkspaceSidebar } from "../components/AgentWorkspaceSidebar.js";
 import { EmptyState } from "../components/EmptyState.js";
@@ -34,6 +35,17 @@ type MoveDialogState = {
   path: string;
   kind: "file" | "directory";
   targetDirectory: string;
+};
+
+type ControlMutationError = Error & {
+  status?: number;
+};
+
+type ControlMutationResponse = {
+  ok: boolean;
+  path?: string;
+  nextPath?: string;
+  modifiedAt?: string;
 };
 
 type OperationDialogState =
@@ -116,6 +128,7 @@ function collectDirectoryPaths(items: WorkspaceFile[]) {
 }
 
 export function AgentWorkspaceBrowserPage() {
+  const { t } = useI18n();
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -294,14 +307,8 @@ export function AgentWorkspaceBrowserPage() {
       return;
     }
 
-    let isCancelled = false;
-
     void loadWorkspaceTree(agent.id, { resetSelection: true });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [agent?.id, loadWorkspaceTree, token]);
+  }, [agent, loadWorkspaceTree, token]);
 
   const isEditableTextFile = useMemo(() => {
     if (selectedPathKind !== "file" || !selectedPath) {
@@ -312,6 +319,15 @@ export function AgentWorkspaceBrowserPage() {
   }, [selectedPath, selectedPathKind]);
 
   const directoryPaths = useMemo(() => collectDirectoryPaths(workspaceItems), [workspaceItems]);
+
+  const getMutationStatus = useCallback((error: unknown) => {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+
+    const status = (error as { status?: unknown }).status;
+    return typeof status === "number" ? status : null;
+  }, []);
 
   const sendControlMutation = useCallback(
     async <T extends object>(url: string, body: T, idempotencySeed: string) => {
@@ -350,10 +366,12 @@ export function AgentWorkspaceBrowserPage() {
           message = `Control API route not found (${url}). Restart daemon with latest code.`;
         }
 
-        throw new Error(message);
+        const mutationError = new Error(message) as ControlMutationError;
+        mutationError.status = response.status;
+        throw mutationError;
       }
 
-      return (await response.json()) as { ok: boolean; path?: string; nextPath?: string; modifiedAt?: string };
+      return (await response.json()) as ControlMutationResponse;
     },
     [armWrites, token]
   );
@@ -376,8 +394,7 @@ export function AgentWorkspaceBrowserPage() {
         try {
           await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/files/create`, { path: normalizedPath, content: "" }, "file-create");
         } catch (error) {
-          const message = error instanceof Error ? error.message : "";
-          if (!message.includes("(404)")) {
+          if (getMutationStatus(error) !== 404) {
             throw error;
           }
 
@@ -399,7 +416,7 @@ export function AgentWorkspaceBrowserPage() {
         setIsFileOperationLoading(false);
       }
     },
-    [agent, loadFileContent, loadWorkspaceTree, sendControlMutation]
+    [agent, getMutationStatus, loadFileContent, loadWorkspaceTree, sendControlMutation]
   );
 
   const handleCreateFolderAt = useCallback(
@@ -476,16 +493,14 @@ export function AgentWorkspaceBrowserPage() {
           try {
             await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/delete`, { path: pathToDelete, recursive: true }, "path-delete");
           } catch (error) {
-            const message = error instanceof Error ? error.message : "";
-            if (!message.includes("(404)")) {
+            if (getMutationStatus(error) !== 404) {
               throw error;
             }
 
             try {
               await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/files/delete`, { path: pathToDelete }, "file-delete-legacy-body");
             } catch (legacyError) {
-              const legacyMessage = legacyError instanceof Error ? legacyError.message : "";
-              if (!legacyMessage.includes("(404)")) {
+              if (getMutationStatus(legacyError) !== 404) {
                 throw legacyError;
               }
 
@@ -516,7 +531,7 @@ export function AgentWorkspaceBrowserPage() {
         setIsFileOperationLoading(false);
       }
     },
-    [agent, loadWorkspaceTree, selectedPath, sendControlMutation]
+    [agent, getMutationStatus, loadWorkspaceTree, selectedPath, sendControlMutation]
   );
 
   const handleMovePath = useCallback(
@@ -528,7 +543,28 @@ export function AgentWorkspaceBrowserPage() {
       setIsFileOperationLoading(true);
       setFileOperationError(null);
       try {
-        const body = await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/move`, { path: pathToMove, targetDirectory }, "path-move");
+        let body: ControlMutationResponse;
+        try {
+          body = await sendControlMutation(`/api/control/agents/${encodeURIComponent(agent.id)}/paths/move`, { path: pathToMove, targetDirectory }, "path-move");
+        } catch (error) {
+          if (getMutationStatus(error) !== 404) {
+            throw error;
+          }
+
+          const pathSegments = pathToMove.split("/").filter((segment) => segment.length > 0);
+          const sourceName = pathSegments[pathSegments.length - 1];
+          if (!sourceName) {
+            throw error;
+          }
+
+          const legacyTargetPath = joinRelativePath(targetDirectory, sourceName);
+          body = await sendControlMutation(
+            `/api/control/agents/${encodeURIComponent(agent.id)}/paths/rename`,
+            { path: pathToMove, nextPath: legacyTargetPath },
+            "path-move-legacy-rename"
+          );
+        }
+
         await loadWorkspaceTree(agent.id, { resetSelection: false });
         const nextPath = typeof body.nextPath === "string" ? body.nextPath : null;
         if (nextPath) {
@@ -544,7 +580,7 @@ export function AgentWorkspaceBrowserPage() {
         setIsFileOperationLoading(false);
       }
     },
-    [agent, loadFileContent, loadWorkspaceTree, sendControlMutation]
+    [agent, getMutationStatus, loadFileContent, loadWorkspaceTree, sendControlMutation]
   );
 
   const handleFileSelect = useCallback(
@@ -722,7 +758,7 @@ export function AgentWorkspaceBrowserPage() {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="border-b border-slate-200 bg-white/80 px-10 py-5 backdrop-blur-md">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>Full Workspace</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900" style={{ fontFamily: "var(--font-serif)" }}>{t("workspace.browser.title")}</h1>
             {agent ? <p className="text-xs text-slate-600 truncate">{agent.name}</p> : null}
           </div>
         </header>
@@ -738,7 +774,7 @@ export function AgentWorkspaceBrowserPage() {
           ) : (
             <ErrorBoundary fallbackTitle="Workspace browser failed to render.">
               <div className="relative mx-auto flex h-full min-h-0 max-w-[1240px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div
+                <aside
                   ref={treePanelRef}
                   className="relative w-80 min-w-80 overflow-auto border-r border-slate-200 bg-slate-50/60 p-3"
                   onContextMenu={(event) => {
@@ -770,13 +806,13 @@ export function AgentWorkspaceBrowserPage() {
                     void handleMovePath(sourcePath, sourceKind, "");
                   }}
                 >
-                  <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">Right click for actions · Drag files/folders to move</p>
+                  <p className="mb-2 px-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">{t("workspace.browser.hint")}</p>
                   {fileOperationError ? <p className="mb-2 px-2 text-xs text-rose-700">{fileOperationError}</p> : null}
 
                   {isWorkspaceLoading ? (
                     <div className="space-y-2">
-                      {Array.from({ length: 8 }).map((_, index) => (
-                        <Skeleton key={index} variant="line" className="h-5" />
+                      {["b-1", "b-2", "b-3", "b-4", "b-5", "b-6", "b-7", "b-8"].map((skeletonId) => (
+                        <Skeleton key={skeletonId} variant="line" className="h-5" />
                       ))}
                     </div>
                   ) : workspaceError ? (
@@ -808,25 +844,25 @@ export function AgentWorkspaceBrowserPage() {
                       style={{ left: contextMenu.x, top: contextMenu.y }}
                       onPointerDown={(event) => event.stopPropagation()}
                     >
-                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-file")}>New File</button>
-                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-folder")}>New Folder</button>
+                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-file")}>{t("workspace.browser.newFile")}</button>
+                      <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("create-folder")}>{t("workspace.browser.newFolder")}</button>
                       {contextMenu.path && contextMenu.kind !== "background" ? (
                         <>
                           <div className="my-1 border-t border-slate-200" />
-                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("rename")}>Rename</button>
-                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("move")}>Move to...</button>
-                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50" onClick={() => void runContextAction("delete")}>Delete</button>
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("rename")}>{t("workspace.browser.rename")}</button>
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-100" onClick={() => void runContextAction("move")}>{t("workspace.browser.moveTo")}</button>
+                          <button type="button" className="block w-full rounded px-3 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50" onClick={() => void runContextAction("delete")}>{t("common.delete")}</button>
                         </>
                       ) : null}
                     </div>
                   ) : null}
-                </div>
+                </aside>
 
                 <div className="flex-1 min-w-0 p-4 overflow-auto">
                   {!selectedPath ? (
-                    <p className="text-xs text-slate-600">Select a file to view content.</p>
+                    <p className="text-xs text-slate-600">{t("workspace.browser.selectFile")}</p>
                   ) : selectedPathKind === "directory" ? (
-                    <p className="text-xs text-slate-600">Selected path is a directory.</p>
+                    <p className="text-xs text-slate-600">{t("workspace.browser.selectedDirectory")}</p>
                   ) : isFileLoading ? (
                     <div className="space-y-3">
                       <Skeleton variant="line" className="w-2/3" />
@@ -841,7 +877,7 @@ export function AgentWorkspaceBrowserPage() {
                         <div className="min-w-0">
                           <p className="text-xs text-slate-600 truncate">{selectedPath}</p>
                           <p className="text-[10px] text-slate-500">
-                            {selectedFileModifiedAt ? `Modified: ${selectedFileModifiedAt}` : "Modified: unknown"}
+                            {selectedFileModifiedAt ? t("workspace.preview.modifiedPrefix", { value: selectedFileModifiedAt }) : t("workspace.preview.modifiedUnknown")}
                           </p>
                         </div>
 
@@ -852,7 +888,7 @@ export function AgentWorkspaceBrowserPage() {
                               onClick={handleLeaveEditor}
                               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
                             >
-                              Back to preview
+                              {t("workspace.browser.backToPreview")}
                             </button>
                           ) : (
                             <button
@@ -860,11 +896,11 @@ export function AgentWorkspaceBrowserPage() {
                               onClick={() => setIsEditingFile(true)}
                               className="rounded-lg bg-[#1f5ba6] px-3 py-1.5 text-xs text-white hover:bg-[#174d92]"
                             >
-                              Edit
+                              {t("workspace.browser.edit")}
                             </button>
                           )
                         ) : (
-                          <span className="text-[10px] uppercase tracking-wider text-slate-500">Read only</span>
+                          <span className="text-[10px] uppercase tracking-wider text-slate-500">{t("workspace.browser.readOnly")}</span>
                         )}
                       </div>
 
@@ -889,26 +925,25 @@ export function AgentWorkspaceBrowserPage() {
               {operationDialog ? (
                 <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/20">
                   <div className="w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-                    {operationDialog.mode === "create-file" ? <h3 className="text-sm font-semibold text-slate-900">Create File (.md/.txt)</h3> : null}
-                    {operationDialog.mode === "create-folder" ? <h3 className="text-sm font-semibold text-slate-900">Create Folder</h3> : null}
-                    {operationDialog.mode === "rename" ? <h3 className="text-sm font-semibold text-slate-900">Rename {operationDialog.kind}</h3> : null}
-                    {operationDialog.mode === "delete" ? <h3 className="text-sm font-semibold text-slate-900">Delete {operationDialog.kind}</h3> : null}
+                    {operationDialog.mode === "create-file" ? <h3 className="text-sm font-semibold text-slate-900">{t("workspace.browser.createFile")}</h3> : null}
+                    {operationDialog.mode === "create-folder" ? <h3 className="text-sm font-semibold text-slate-900">{t("workspace.browser.createFolder")}</h3> : null}
+                    {operationDialog.mode === "rename" ? <h3 className="text-sm font-semibold text-slate-900">{t("workspace.browser.renameKind", { kind: operationDialog.kind })}</h3> : null}
+                    {operationDialog.mode === "delete" ? <h3 className="text-sm font-semibold text-slate-900">{t("workspace.browser.deleteKind", { kind: operationDialog.kind })}</h3> : null}
 
                     {operationDialog.mode === "delete" ? (
                       <p className="mt-3 text-sm text-slate-700 break-all">
                         {operationDialog.kind === "directory"
-                          ? `Delete folder ${operationDialog.path} and all nested files?`
-                          : `Delete file ${operationDialog.path}?`}
+                          ? t("workspace.browser.deleteFolderPrompt", { path: operationDialog.path })
+                          : t("workspace.browser.deleteFilePrompt", { path: operationDialog.path })}
                       </p>
                     ) : (
                       <>
                         <p className="mt-1 text-xs text-slate-600">
                           {operationDialog.mode === "create-file" || operationDialog.mode === "create-folder"
-                            ? `Target directory: ${operationDialog.directoryPath || "/"}`
-                            : `Current path: ${operationDialog.mode === "rename" ? operationDialog.path : ""}`}
+                            ? t("workspace.browser.targetDirectory", { path: operationDialog.directoryPath || "/" })
+                            : t("workspace.browser.currentPath", { path: operationDialog.mode === "rename" ? operationDialog.path : "" })}
                         </p>
                         <input
-                          autoFocus
                           className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800"
                           value={operationDialog.value}
                           onChange={(event) => setOperationDialog((current) => {
@@ -924,10 +959,10 @@ export function AgentWorkspaceBrowserPage() {
 
                     <div className="mt-4 flex justify-end gap-2">
                       <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100" onClick={() => setOperationDialog(null)}>
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       <button type="button" className="rounded-lg bg-[#1f5ba6] px-3 py-1.5 text-xs text-white hover:bg-[#174d92]" onClick={() => void handleSubmitOperationDialog()}>
-                        {operationDialog.mode === "delete" ? "Delete" : "Confirm"}
+                        {operationDialog.mode === "delete" ? t("common.delete") : t("common.confirm")}
                       </button>
                     </div>
                   </div>
@@ -937,11 +972,11 @@ export function AgentWorkspaceBrowserPage() {
               {moveDialog ? (
                 <div className="absolute inset-0 z-40 flex items-center justify-center bg-slate-900/20">
                   <div className="w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
-                    <h3 className="text-sm font-semibold text-slate-900">Move {moveDialog.kind}</h3>
+                    <h3 className="text-sm font-semibold text-slate-900">{t("workspace.browser.moveKind", { kind: moveDialog.kind })}</h3>
                     <p className="mt-1 text-xs text-slate-600 truncate">{moveDialog.path}</p>
 
                     <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" htmlFor="move-target-directory">
-                      Target Directory
+                      {t("workspace.browser.moveTargetDirectory")}
                     </label>
                     <select
                       id="move-target-directory"
@@ -958,7 +993,7 @@ export function AgentWorkspaceBrowserPage() {
 
                     <div className="mt-4 flex justify-end gap-2">
                       <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100" onClick={() => setMoveDialog(null)}>
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                       <button
                         type="button"
@@ -966,7 +1001,7 @@ export function AgentWorkspaceBrowserPage() {
                         disabled={moveDialog.targetDirectory === resolveParentDirectoryPath(moveDialog.path)}
                         onClick={() => void handleSubmitMoveDialog()}
                       >
-                        Move
+                        {t("common.move")}
                       </button>
                     </div>
                   </div>

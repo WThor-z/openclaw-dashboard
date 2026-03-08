@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "tests/verification/**/*.mjs",
+    "apps/**/*",
+    "packages/**/*",
+    "tests/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

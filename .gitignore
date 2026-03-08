@@ -1,0 +1,35 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+.sisyphus/
+
+# Coverage and caches
+coverage/
+.cache/
+__pycache__/
+*.pyc
+
+# Local env and secrets
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local runtime data
+backups/
+data/
+.openclaw/
+*.sqlite
+*.db
+
+# Logs and temp files
+*.log
+tmp/
+temp/
+
+# Local-only authoring rules/docs
+AGENTS.md
+docs/

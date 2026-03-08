@@ -1,0 +1,293 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700&display=swap");
+
+:root {
+  --color-bg-primary: #f7f8fa;
+  --color-bg-secondary: #f0f2f5;
+  --color-bg-tertiary: #e8edf3;
+  --color-bg-card: #fcfdff;
+  --color-bg-hover: #eef3f9;
+  --color-bg-active: #e3eaf4;
+
+  --color-text-primary: #132235;
+  --color-text-secondary: #3f5268;
+  --color-text-tertiary: #62758a;
+  --color-text-muted: #7f90a2;
+
+  --color-border: #d8e1eb;
+  --color-border-light: #e8eef5;
+  --color-divider: #dce4ee;
+
+  --color-brand-50: #edf4ff;
+  --color-brand-100: #dbe9ff;
+  --color-brand-200: #bed7ff;
+  --color-brand-500: #1f5ba6;
+  --color-brand-600: #164b8d;
+  --color-brand-700: #113a6f;
+
+  --color-success-50: #ecf8f2;
+  --color-success-100: #d6f0e4;
+  --color-success-500: #269f67;
+  --color-success-600: #1b8152;
+
+  --color-warning-50: #fff6e9;
+  --color-warning-100: #ffe9c9;
+  --color-warning-500: #c6872f;
+  --color-warning-600: #9b6820;
+
+  --color-error-50: #fcf0ee;
+  --color-error-100: #f8d9d4;
+  --color-error-500: #b2584a;
+  --color-error-600: #8c4338;
+
+  --color-info-50: #ebf4fb;
+  --color-info-100: #d5e8f7;
+  --color-info-500: #2879b8;
+  --color-info-600: #205f90;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  --font-sans: "Manrope", "Segoe UI", sans-serif;
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-mono: "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  --sidebar-width: 17.5rem;
+  --header-height: 4.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.7rem;
+  --radius-lg: 0.85rem;
+  --radius-xl: 0.95rem;
+
+  --shadow-sm: 0 6px 16px rgb(18 43 74 / 0.06);
+  --shadow-md: 0 12px 28px rgb(18 43 74 / 0.1);
+  --shadow-lg: 0 20px 36px rgb(18 43 74 / 0.14);
+  --shadow-xl: 0 28px 56px rgb(18 43 74 / 0.18);
+
+  --transition-fast: 140ms ease;
+  --transition-base: 220ms ease;
+  --transition-slow: 340ms ease;
+}
+
+[data-theme="dark"] {
+  --color-bg-primary: #0f141b;
+  --color-bg-secondary: #151d27;
+  --color-bg-tertiary: #1b2633;
+  --color-bg-card: #1c2835;
+  --color-bg-hover: #233244;
+  --color-bg-active: #2a3b4f;
+
+  --color-text-primary: #e4ecf7;
+  --color-text-secondary: #b6c4d6;
+  --color-text-tertiary: #92a4ba;
+  --color-text-muted: #76899f;
+
+  --color-border: #314256;
+  --color-border-light: #28384b;
+  --color-divider: #2c3e53;
+
+  --color-brand-50: #1f2f42;
+  --color-brand-100: #27405c;
+  --color-brand-200: #2f5275;
+  --color-brand-500: #73a9ee;
+  --color-brand-600: #8dbced;
+  --color-brand-700: #bfdaf7;
+
+  --color-success-50: #173626;
+  --color-success-100: #1d4931;
+  --color-success-500: #45bb80;
+  --color-success-600: #5dd192;
+
+  --color-warning-50: #3c301a;
+  --color-warning-100: #504023;
+  --color-warning-500: #d6a151;
+  --color-warning-600: #e2b46d;
+
+  --color-error-50: #412321;
+  --color-error-100: #56302d;
+  --color-error-500: #d98479;
+  --color-error-600: #ea9a90;
+
+  --color-info-50: #1a3242;
+  --color-info-100: #1f4257;
+  --color-info-500: #58aee0;
+  --color-info-600: #74bfe9;
+
+  --shadow-sm: 0 8px 18px rgb(4 9 16 / 0.35);
+  --shadow-md: 0 14px 28px rgb(4 9 16 / 0.42);
+  --shadow-lg: 0 24px 44px rgb(4 9 16 / 0.5);
+  --shadow-xl: 0 32px 62px rgb(4 9 16 / 0.55);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background:
+    radial-gradient(circle at 10% 0%, rgb(209 225 244 / 0.6), transparent 38%),
+    radial-gradient(circle at 90% 10%, rgb(227 237 248 / 0.58), transparent 36%),
+    var(--color-bg-primary);
+}
+
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+html[data-theme="dark"],
+body[data-theme="dark"] {
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 10% 0%, rgb(63 86 114 / 0.18), transparent 44%),
+    radial-gradient(circle at 92% 12%, rgb(45 66 91 / 0.14), transparent 42%),
+    var(--color-bg-primary);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+.header-title,
+.sidebar-logo span,
+.card-title,
+.stat-value {
+  font-family: var(--font-serif);
+  letter-spacing: -0.02em;
+}
+
+.status-indicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  display: inline-block;
+}
+
+.status-idle {
+  background-color: #8ea1b4;
+}
+
+.status-busy {
+  background-color: #269f67;
+  box-shadow: 0 0 0 0 rgb(38 159 103 / 0.5);
+  animation: pulse-green 2s infinite;
+}
+
+.status-offline {
+  background-color: #738294;
+}
+
+.status-error {
+  background-color: #b2584a;
+}
+
+.status-indicator.connected {
+  background-color: #269f67;
+}
+
+.status-indicator.disconnected {
+  background-color: #b2584a;
+}
+
+.status-indicator.loading,
+.status-indicator.degraded {
+  background-color: #c6872f;
+}
+
+@keyframes pulse-green {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgb(38 159 103 / 0.5);
+  }
+
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgb(38 159 103 / 0);
+  }
+
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgb(38 159 103 / 0);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #e9eef5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #b8c5d3;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #97a8ba;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: #1b293b;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #3a516c;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #4a6687;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}

@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS webhook_deliveries;
+DROP TABLE IF EXISTS webhooks;
+DROP TABLE IF EXISTS system_metrics;
+DROP TABLE IF EXISTS workspace_metrics;
+DROP TABLE IF EXISTS config_operations;
+DROP TABLE IF EXISTS config_snapshots;
+DROP TABLE IF EXISTS cost_entries;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS events;
+DROP TABLE IF EXISTS sessions;

@@ -33,3 +33,7 @@ temp/
 # Local-only authoring rules/docs
 AGENTS.md
 docs/
+!docs/
+docs/*
+!docs/directory-map.md
+!docs/directory-map.zh-CN.md

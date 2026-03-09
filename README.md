@@ -7,6 +7,8 @@ agent environments. It pairs a Node daemon with a React frontend so you can log 
 inspect agents, browse their workspace files, preview markdown and text output, and
 save changes back through guarded local APIs.
 
+Public-facing version posts and release blogs live under `news/`.
+
 ## Highlights
 
 - Agent Workspace entry at `/dashboard`
@@ -28,6 +30,7 @@ This repo is a pnpm monorepo with three main layers:
 
 Supporting directories:
 
+- `news` - public-facing version posts and release technical blogs
 - `tests/e2e` - Playwright browser coverage
 - `tests/contracts` - cross-app contract coverage
 - `tools/simulator` - simulator implementation and launcher package
@@ -55,8 +58,9 @@ If the structure still feels hard to read, start here:
 
 - English map: `docs/directory-map.md`
 - Chinese map: `docs/directory-map.zh-CN.md`
+- Version news: `news/`
 
-These two files are the canonical "where should this file live" guide.
+These files are the canonical entry points for repo structure and release-facing docs.
 
 ## Requirements
 

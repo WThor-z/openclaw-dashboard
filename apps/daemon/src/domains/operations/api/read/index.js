@@ -1,4 +1,5 @@
 import { HttpError } from "../../../../shared/middleware/error-handler.js";
+import { createAgentRuntimeReadApiRouter } from "../../../agent-runtime/api/read/index.js";
 import { handleDailyCostsRead } from "../../read/costs.js";
 import { handleEventsRead } from "../../read/events.js";
 import {
@@ -12,15 +13,9 @@ import {
   handleOpenclawMonitorRead,
   handleWorkspaceMonitorsRead
 } from "../../read/monitors.js";
-import {
-  handleSessionDetailRead,
-  handleSessionsListRead
-} from "../../read/sessions.js";
+import { handleSessionDetailRead, handleSessionsListRead } from "../../read/sessions.js";
 import { handleStatusRead } from "../../read/status.js";
-import {
-  handleTaskDetailRead,
-  handleTasksListRead
-} from "../../read/tasks.js";
+import { handleTaskDetailRead, handleTasksListRead } from "../../read/tasks.js";
 import { handleWebhookDeliveriesRead, handleWebhooksSummaryRead } from "./webhooks.js";
 
 function extractSuffix(pathname, prefix) {
@@ -82,7 +77,17 @@ function resolveAgentFilesRoute(pathname) {
   return { agentId, filePath: decodePathOrThrow(encodedFilePath) };
 }
 
-export function createReadApiRouter({ repositories, statusProvider, monitorProviders }) {
+export function createReadApiRouter({
+  repositories,
+  statusProvider,
+  monitorProviders,
+  openclawRuntimeAdapter
+}) {
+  const agentRuntimeReadRouter = createAgentRuntimeReadApiRouter({
+    repositories,
+    openclawRuntimeAdapter
+  });
+
   return {
     async handle(req, res, requestUrl) {
       if (req.method !== "GET") {
@@ -132,7 +137,16 @@ export function createReadApiRouter({ repositories, statusProvider, monitorProvi
           return true;
         }
 
-        await handleAgentFileRead(res, monitorProviders, agentFilesRoute.agentId, agentFilesRoute.filePath);
+        await handleAgentFileRead(
+          res,
+          monitorProviders,
+          agentFilesRoute.agentId,
+          agentFilesRoute.filePath
+        );
+        return true;
+      }
+
+      if (await agentRuntimeReadRouter.handle(req, res, requestUrl)) {
         return true;
       }
 

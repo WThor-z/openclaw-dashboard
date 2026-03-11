@@ -14,6 +14,7 @@
 - 从 session registry 与配置回退中加载 Agent 数据
 - 兼容 legacy OpenClaw 风格的配置与状态目录
 - 解析 Agent 工作区根路径用于文件浏览和保存
+- 提供 V2 Agent Runtime API，支持 conversations、schedules、heartbeat 与 memory
 
 ## 常用命令
 
@@ -38,6 +39,8 @@ pnpm --filter @apps/daemon test
 - `src/platform/ingest/` - 统一事件信封规范化与摄入流水线
 - `src/domains/operations/api/read/` - dashboard 只读 API 路由与读侧 agent/webhook 处理器
 - `src/domains/operations/api/control/` - 受保护变更 API 路由与控制侧 agent 处理器
+- `src/domains/agent-runtime/api/read/` - V2 runtime 读 API，覆盖 conversations、schedules、heartbeat、memory
+- `src/domains/agent-runtime/api/control/` - V2 runtime 控制 API，覆盖创建 conversation、发送消息、管理 schedule、更新 heartbeat、配置 memory
 - `tests/` - daemon 单元与集成测试
 
 ## Agent 发现逻辑
@@ -51,7 +54,41 @@ daemon 可从以下来源发现 Agent：
 
 当运行时 registry 缺失时，会回退到配置中的 Agent，保证 dashboard 仍可展示已知工作区。
 
+## V2 Agent Runtime API
+
+daemon 为 Agent 绑定的 conversations、schedules、heartbeat 和 memory 提供 V2 runtime 端点：
+
+读端点：
+
+- `GET /api/agents/:agentId/conversations` - 列出 Agent 的 conversations
+- `GET /api/conversations/:conversationId` - conversation 详情
+- `GET /api/conversations/:conversationId/messages` - conversation 消息
+- `GET /api/agents/:agentId/schedules` - 列出 schedules
+- `GET /api/agents/:agentId/schedules/:jobId/runs` - schedule 执行历史
+- `GET /api/agents/:agentId/heartbeat` - 读取 heartbeat 配置
+- `GET /api/agents/:agentId/memory` - 读取 memory bindings
+
+控制端点（需要 arming）：
+
+- `POST /api/control/agents/:agentId/conversations/create` - 创建 conversation
+- `POST /api/control/conversations/:conversationId/messages/send` - 发送消息
+- `POST /api/control/conversations/:conversationId/archive` - 归档 conversation
+- `POST /api/control/agents/:agentId/schedules/create` - 创建 schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/update` - 更新 schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/run` - 触发 schedule 执行
+- `POST /api/control/agents/:agentId/schedules/:jobId/remove` - 删除 schedule
+- `POST /api/control/agents/:agentId/heartbeat/update` - 更新 heartbeat
+- `POST /api/control/agents/:agentId/memory/configure` - 配置 memory
+
+Runtime 特性：
+
+- **Conversation 隔离** - conversations 通过唯一的 session key 绑定到 Agent
+- **Schedule 管理** - 基于 cron 的定期提示，附带执行历史
+- **Heartbeat 配置** - 定期 Agent 心跳检查，字段包括 `every`、`session` 和 `lightContext`
+- **Memory bindings** - 分作用域的 memory 绑定，仅使用 `secretRef` 和 `apiKeyRef`（不支持原始密钥）
+
 ## 说明
 
 - 该服务面向本地可信环境
 - 浏览器端到端验证由仓库级 Playwright 测试覆盖
+- V2 runtime API 复用与其他控制 API 相同的鉴权、arming window、幂等重放和审计事件持久化机制

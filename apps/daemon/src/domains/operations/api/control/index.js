@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { createAgentRuntimeControlApi } from "../../../agent-runtime/api/control/index.js";
 import { HttpError, sendJson } from "../../../../shared/middleware/error-handler.js";
 import { createMonitorProvidersFromEnv } from "../../../../platform/monitoring/collectors.js";
 import { redactSecrets } from "../../../../shared/redaction.js";
@@ -202,7 +203,8 @@ export function createControlApiRouter({
   monitorProviders = createMonitorProvidersFromEnv(),
   readOnlyMode = false,
   writeArmWindowMs = DEFAULT_ARM_WINDOW_MS,
-  webhookEndpointPolicy = {}
+  webhookEndpointPolicy = {},
+  openclawRuntimeAdapter
 } = {}) {
   const mutationLocks = new Map();
   const armingState = {
@@ -212,6 +214,10 @@ export function createControlApiRouter({
         ? writeArmWindowMs
         : DEFAULT_ARM_WINDOW_MS
   };
+  const agentRuntimeControlApi = createAgentRuntimeControlApi({
+    repositories,
+    openclawRuntimeAdapter
+  });
 
   function assertWriteAllowed(pathname) {
     if (readOnlyMode && pathname.startsWith("/api/control/")) {
@@ -541,12 +547,25 @@ export function createControlApiRouter({
         return true;
       }
 
+      const agentRuntimeRoute = agentRuntimeControlApi.resolve(pathname);
+      if (agentRuntimeRoute !== null) {
+        await handleMutation(
+          req,
+          res,
+          pathname,
+          agentRuntimeRoute.routeKey,
+          agentRuntimeRoute.mutate
+        );
+        return true;
+      }
+
       if (pathname === "/api/control/tasks/enqueue") {
         await handleMutation(req, res, pathname, "control.tasks.enqueue", async (body) => {
           const now = new Date().toISOString();
-          const taskId = typeof body.taskId === "string" && body.taskId.trim().length > 0
-            ? body.taskId.trim()
-            : randomUUID();
+          const taskId =
+            typeof body.taskId === "string" && body.taskId.trim().length > 0
+              ? body.taskId.trim()
+              : randomUUID();
           const workspaceId =
             typeof body.workspaceId === "string" && body.workspaceId.trim().length > 0
               ? body.workspaceId.trim()
@@ -607,20 +626,26 @@ export function createControlApiRouter({
 
       const approvalId = resolveApprovalSuffix(pathname);
       if (approvalId !== null) {
-        await handleMutation(req, res, pathname, `control.approvals.resolve:${approvalId}`, async (body) => {
-          const decision = body.decision === "reject" ? "reject" : "approve";
-          const workspaceId =
-            typeof body.workspaceId === "string" && body.workspaceId.trim().length > 0
-              ? body.workspaceId.trim()
-              : "global";
+        await handleMutation(
+          req,
+          res,
+          pathname,
+          `control.approvals.resolve:${approvalId}`,
+          async (body) => {
+            const decision = body.decision === "reject" ? "reject" : "approve";
+            const workspaceId =
+              typeof body.workspaceId === "string" && body.workspaceId.trim().length > 0
+                ? body.workspaceId.trim()
+                : "global";
 
-          return {
-            status: 200,
-            body: { ok: true, approvalId, decision, resolved: true },
-            workspaceId,
-            kind: "control.approvals.resolve"
-          };
-        });
+            return {
+              status: 200,
+              body: { ok: true, approvalId, decision, resolved: true },
+              workspaceId,
+              kind: "control.approvals.resolve"
+            };
+          }
+        );
         return true;
       }
 
@@ -701,12 +726,12 @@ export function createControlApiRouter({
 
               const updated = repositories?.webhooks?.update
                 ? repositories.webhooks.update({
-                  id: webhookRoute.webhookId,
-                  endpointUrl: normalizedEndpointUrl,
-                  secretRef,
-                  enabled,
-                  updatedAt: now
-                })
+                    id: webhookRoute.webhookId,
+                    endpointUrl: normalizedEndpointUrl,
+                    secretRef,
+                    enabled,
+                    updatedAt: now
+                  })
                 : false;
               if (!updated) {
                 throw new HttpError(404, "WEBHOOK_NOT_FOUND", "Webhook not found");
@@ -822,16 +847,16 @@ export function createControlApiRouter({
             const result =
               agentFileRoute.action === "delete"
                 ? await deleteAgentFile({
-                  monitorProviders,
-                  agentId: agentFileRoute.agentId,
-                  requestedPath: agentFileRoute.filePath
-                })
+                    monitorProviders,
+                    agentId: agentFileRoute.agentId,
+                    requestedPath: agentFileRoute.filePath
+                  })
                 : await writeAgentFile({
-                  body,
-                  monitorProviders,
-                  agentId: agentFileRoute.agentId,
-                  requestedPath: agentFileRoute.filePath
-                });
+                    body,
+                    monitorProviders,
+                    agentId: agentFileRoute.agentId,
+                    requestedPath: agentFileRoute.filePath
+                  });
 
             return {
               status: 200,
@@ -1023,7 +1048,11 @@ export function createControlApiRouter({
             `control.agents.paths.move:${pathOperationRoute.agentId}`,
             async (body) => {
               if (typeof body.path !== "string" || typeof body.targetDirectory !== "string") {
-                throw new HttpError(400, "INVALID_BODY", "path and targetDirectory must be UTF-8 strings");
+                throw new HttpError(
+                  400,
+                  "INVALID_BODY",
+                  "path and targetDirectory must be UTF-8 strings"
+                );
               }
 
               const result = await moveWorkspacePath({
@@ -1088,7 +1117,11 @@ export function createControlApiRouter({
               : "global";
           const baseVersion = parseNumber(body.baseVersion);
           if (baseVersion === null || !Number.isInteger(baseVersion) || baseVersion < 0) {
-            throw new HttpError(400, "INVALID_BASE_VERSION", "baseVersion must be a non-negative integer");
+            throw new HttpError(
+              400,
+              "INVALID_BASE_VERSION",
+              "baseVersion must be a non-negative integer"
+            );
           }
 
           const config = isObjectRecord(body.config) ? body.config : {};

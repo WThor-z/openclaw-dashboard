@@ -12,6 +12,7 @@ import { attachRequestId } from "../shared/middleware/request-id.js";
 import { resolveBindConfig } from "./config.js";
 import { createWebhookOutboxWorker } from "../platform/webhooks/outbox-worker.js";
 import { resolveWebhookEndpointPolicy } from "../platform/webhooks/endpoint-policy.js";
+import { createOpenclawRuntimeAdapter } from "../platform/openclaw/runtime-adapter.js";
 
 function parseRequestUrl(req) {
   return new URL(req.url ?? "/", "http://localhost");
@@ -34,18 +35,21 @@ function requestHandlerFactory({
   readOnlyMode,
   writeArmWindowMs,
   readAuthEnabled,
-  webhookEndpointPolicy
+  webhookEndpointPolicy,
+  openclawRuntimeAdapter
 }) {
   const readRouter = createReadApiRouter({
     repositories,
     statusProvider,
-    monitorProviders
+    monitorProviders,
+    openclawRuntimeAdapter
   });
   const controlRouter = createControlApiRouter({
     repositories,
     readOnlyMode,
     writeArmWindowMs,
-    webhookEndpointPolicy
+    webhookEndpointPolicy,
+    openclawRuntimeAdapter
   });
 
   return async function handleRequest(req, res) {
@@ -112,6 +116,7 @@ export function createDaemonServer({
   statusProvider,
   monitorProviders = createMonitorProvidersFromEnv(),
   webhookEndpointPolicy = resolveWebhookEndpointPolicy(),
+  openclawRuntimeAdapter = createOpenclawRuntimeAdapter(),
   webhookWorker,
   webhookWorkerOptions = {}
 } = {}) {
@@ -122,30 +127,31 @@ export function createDaemonServer({
       logger,
       repositories,
       statusProvider,
-        monitorProviders,
-        readOnlyMode,
-        writeArmWindowMs,
-        readAuthEnabled,
-        webhookEndpointPolicy
-      })
+      monitorProviders,
+      readOnlyMode,
+      writeArmWindowMs,
+      readAuthEnabled,
+      webhookEndpointPolicy,
+      openclawRuntimeAdapter
+    })
   );
 
   const worker =
     webhookWorker ??
     (repositories?.webhookDeliveries && repositories?.webhooks
       ? createWebhookOutboxWorker({
-        repositories,
-        resolveSecretRef(secretRef) {
-          if (typeof secretRef !== "string" || secretRef.length === 0) {
-            return null;
-          }
+          repositories,
+          resolveSecretRef(secretRef) {
+            if (typeof secretRef !== "string" || secretRef.length === 0) {
+              return null;
+            }
 
-          return process.env[secretRef] ?? null;
-        },
-        logger,
-        endpointPolicy: webhookEndpointPolicy,
-        ...webhookWorkerOptions
-      })
+            return process.env[secretRef] ?? null;
+          },
+          logger,
+          endpointPolicy: webhookEndpointPolicy,
+          ...webhookWorkerOptions
+        })
       : null);
 
   return {

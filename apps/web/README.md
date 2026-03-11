@@ -15,6 +15,7 @@ the Agent Workspace experience at `/dashboard`.
 - shows a recursive file tree for agent workspaces
 - previews markdown files and supports editing supported text files
 - sends save requests through the daemon control API
+- provides V2 Agent Runtime UI with conversations, schedules, heartbeat, and memory tabs
 
 ## Stack
 
@@ -41,6 +42,10 @@ pnpm --filter @apps/web build
 - `src/domains/auth/pages/LoginPage.tsx` - login page owned by the auth domain
 - `src/domains/agent-workspace/pages/AgentWorkspacePage.tsx` - main Agent Workspace page
 - `src/domains/agent-workspace/` - domain slice for workspace pages, sidebar, and storage/markdown helpers
+- `src/domains/agent-runtime/` - V2 runtime domain with conversations, schedules, heartbeat, and memory UI
+- `src/domains/agent-runtime/pages/AgentRuntimePage.tsx` - runtime main page at `/agents/:agentId/runtime`
+- `src/domains/agent-runtime/pages/AgentRuntimeConversationPage.tsx` - conversation thread page
+- `src/domains/agent-runtime/components/AgentRuntimeShell.tsx` - runtime shell with tab navigation
 - `src/shared/components/` - app-local reusable UI building blocks such as agent cards, file tree, and editor
 - `src/shared/hooks/` - app-local reusable hooks that support web domains
 - `src/shared/styles/` - app-local dashboard styles and Tailwind entrypoint
@@ -49,5 +54,7 @@ pnpm --filter @apps/web build
 ## Notes
 
 - the main product entry is `/dashboard`
+- V2 runtime entry is `/agents/:agentId/runtime`
+- protected routes require authentication via `ProtectedRoute` component
 - the app expects a reachable local daemon API
 - browser regression coverage lives in the repo-level `tests/e2e`

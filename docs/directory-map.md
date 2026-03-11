@@ -20,6 +20,8 @@ This file is the fastest way to decide **where to put code** in this repo.
 
 - `app/` - router, providers, auth, theme, bootstrap
 - `domains/<domain>/` - frontend business features/pages
+  - `domains/agent-workspace/` - workspace pages, sidebar, and storage/markdown helpers
+  - `domains/agent-runtime/` - V2 runtime domain with conversations, schedules, heartbeat, and memory
 - `shared/` - reusable UI, hooks, and styles used by web domains
 - `main.tsx` - web entrypoint
 
@@ -29,6 +31,8 @@ Rule of thumb: if it is web business behavior, put it in `domains/`; if reused b
 
 - `app/` - daemon startup and server composition
 - `domains/<domain>/` - backend business logic and API domain handlers
+  - `domains/operations/` - operations domain with read/control APIs for agents, webhooks, and workspace
+  - `domains/agent-runtime/` - V2 runtime domain with conversations, schedules, heartbeat, and memory APIs
 - `platform/` - infrastructure adapters (storage, gateway, monitoring, ingest, webhooks, openclaw)
 - `shared/` - daemon-local shared middleware/helpers
 

@@ -2,6 +2,8 @@ import React, { type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { LoginPage } from "../domains/auth/pages/LoginPage.js";
+import { AgentRuntimeConversationPage } from "../domains/agent-runtime/pages/AgentRuntimeConversationPage.js";
+import { AgentRuntimePage } from "../domains/agent-runtime/pages/AgentRuntimePage.js";
 import { AgentWorkspaceBrowserPage } from "../domains/agent-workspace/pages/AgentWorkspaceBrowserPage.js";
 import { AgentWorkspacePage } from "../domains/agent-workspace/pages/AgentWorkspacePage.js";
 import { AgentWorkspacePinnedFilesPage } from "../domains/agent-workspace/pages/AgentWorkspacePinnedFilesPage.js";
@@ -72,6 +74,22 @@ export function App() {
                   </ProtectedRoute>
                 }
                 path="/agents/:agentId/quick-notes"
+              />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AgentRuntimePage />
+                  </ProtectedRoute>
+                }
+                path="/agents/:agentId/runtime"
+              />
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <AgentRuntimeConversationPage />
+                  </ProtectedRoute>
+                }
+                path="/agents/:agentId/runtime/conversations/:conversationId"
               />
               <Route element={<RootRedirect />} path="*" />
             </Routes>

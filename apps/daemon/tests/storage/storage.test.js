@@ -37,6 +37,8 @@ describe("storage migrations", () => {
 
     expect(tables).toEqual(
       expect.arrayContaining([
+        "conversation_messages",
+        "conversations",
         "config_operations",
         "config_snapshots",
         "cost_entries",
@@ -57,6 +59,10 @@ describe("storage migrations", () => {
 
     expect(indexes).toEqual(
       expect.arrayContaining([
+        "idx_conversation_messages_conversation_created_at",
+        "idx_conversation_messages_created_at",
+        "idx_conversations_agent_updated_at",
+        "idx_conversations_workspace_updated_at",
         "idx_events_session_created_at",
         "idx_events_workspace_created_at",
         "idx_sessions_workspace_started_at"
@@ -133,9 +139,7 @@ describe("storage repositories", () => {
         snapshotJson: "{}",
         capturedAt: "2026-03-04T10:00:00.000Z"
       });
-    }).toThrowError(
-      expect.objectContaining({ code: SECRET_PERSISTENCE_BLOCKED })
-    );
+    }).toThrowError(expect.objectContaining({ code: SECRET_PERSISTENCE_BLOCKED }));
   });
 
   it("manages webhook outbox retries and breaker persistence", () => {
@@ -212,6 +216,122 @@ describe("storage repositories", () => {
       attemptCount: 1,
       responseCode: 503,
       nextAttemptAt: "2026-03-04T11:00:06.000Z"
+    });
+  });
+
+  it("persists conversations and assistant message lifecycle", () => {
+    const db = createMemoryDb();
+
+    runMigrations(db, { direction: "up" });
+    const repos = createStorageRepositories(db);
+
+    repos.conversations.insert({
+      id: "conversation-1",
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionKey: "dashboard:agent-1:conversation-1",
+      title: "Weekly review",
+      status: "active",
+      createdAt: "2026-03-10T10:00:00.000Z",
+      updatedAt: "2026-03-10T10:00:00.000Z",
+      archivedAt: null
+    });
+
+    repos.conversationMessages.insert({
+      id: "message-user-1",
+      conversationId: "conversation-1",
+      role: "user",
+      state: "completed",
+      content: "Summarize the latest changes.",
+      errorCode: null,
+      externalMessageId: null,
+      createdAt: "2026-03-10T10:00:30.000Z",
+      updatedAt: "2026-03-10T10:00:30.000Z"
+    });
+
+    const pendingAssistantMessage = repos.conversationMessages.appendPendingAssistantMessage({
+      id: "message-assistant-1",
+      conversationId: "conversation-1",
+      content: "Working on it...",
+      createdAt: "2026-03-10T10:01:00.000Z",
+      externalMessageId: "openclaw-msg-1"
+    });
+
+    expect(pendingAssistantMessage).toMatchObject({
+      id: "message-assistant-1",
+      conversationId: "conversation-1",
+      role: "assistant",
+      state: "pending",
+      content: "Working on it...",
+      errorCode: null,
+      externalMessageId: "openclaw-msg-1",
+      createdAt: "2026-03-10T10:01:00.000Z",
+      updatedAt: "2026-03-10T10:01:00.000Z"
+    });
+
+    const completed = repos.conversationMessages.completeAssistantMessage({
+      id: "message-assistant-1",
+      state: "completed",
+      content: "Latest changes are summarized here.",
+      errorCode: null,
+      externalMessageId: "openclaw-msg-1",
+      updatedAt: "2026-03-10T10:01:30.000Z"
+    });
+
+    expect(completed).toBe(true);
+
+    const detail = repos.conversations.getById("conversation-1");
+    expect(detail).toMatchObject({
+      id: "conversation-1",
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionKey: "dashboard:agent-1:conversation-1",
+      title: "Weekly review",
+      status: "active",
+      createdAt: "2026-03-10T10:00:00.000Z",
+      updatedAt: "2026-03-10T10:00:00.000Z",
+      archivedAt: null,
+      lastMessageAt: "2026-03-10T10:01:00.000Z",
+      messageCount: 2
+    });
+
+    const listed = repos.conversations.listByAgent("agent-1");
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      id: "conversation-1",
+      lastMessageAt: "2026-03-10T10:01:00.000Z",
+      messageCount: 2
+    });
+
+    const messages = repos.conversationMessages.listByConversation("conversation-1");
+    expect(messages).toEqual([
+      expect.objectContaining({
+        id: "message-assistant-1",
+        role: "assistant",
+        state: "completed",
+        content: "Latest changes are summarized here.",
+        updatedAt: "2026-03-10T10:01:30.000Z"
+      }),
+      expect.objectContaining({
+        id: "message-user-1",
+        role: "user",
+        state: "completed",
+        content: "Summarize the latest changes.",
+        updatedAt: "2026-03-10T10:00:30.000Z"
+      })
+    ]);
+
+    const archived = repos.conversations.archiveConversation({
+      id: "conversation-1",
+      archivedAt: "2026-03-10T10:02:00.000Z",
+      updatedAt: "2026-03-10T10:02:00.000Z"
+    });
+
+    expect(archived).toBe(true);
+    expect(repos.conversations.getById("conversation-1")).toMatchObject({
+      status: "archived",
+      archivedAt: "2026-03-10T10:02:00.000Z",
+      updatedAt: "2026-03-10T10:02:00.000Z"
     });
   });
 });

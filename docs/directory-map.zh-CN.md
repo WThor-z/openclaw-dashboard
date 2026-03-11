@@ -20,6 +20,8 @@
 
 - `app/` - 路由、provider、鉴权、主题、启动装配
 - `domains/<domain>/` - 前端业务功能/页面
+  - `domains/agent-workspace/` - workspace 页面、侧栏与 storage/markdown 工具
+  - `domains/agent-runtime/` - V2 runtime 业务域，包含 conversations、schedules、heartbeat、memory
 - `shared/` - 被多个 web domain 复用的 UI、hooks、styles
 - `main.tsx` - 前端入口
 
@@ -29,6 +31,8 @@
 
 - `app/` - daemon 启动与服务组合
 - `domains/<domain>/` - 后端业务逻辑与 API 领域处理
+  - `domains/operations/` - operations 业务域，包含 agents、webhooks、workspace 的读/控制 API
+  - `domains/agent-runtime/` - V2 runtime 业务域，包含 conversations、schedules、heartbeat、memory API
 - `platform/` - 基础设施适配层（storage、gateway、monitoring、ingest、webhooks、openclaw）
 - `shared/` - daemon 内共享中间件/辅助模块
 

@@ -15,6 +15,7 @@ workspace file access used by the frontend.
 - loads agent data from session registry files and config fallbacks
 - supports legacy OpenClaw-style config and state directories
 - resolves agent workspace roots for file browsing and saving
+- provides V2 Agent Runtime APIs for conversations, schedules, heartbeat, and memory
 
 ## Commands
 
@@ -39,6 +40,8 @@ pnpm --filter @apps/daemon test
 - `src/platform/ingest/` - canonical event envelope normalization and ingestion pipeline
 - `src/domains/operations/api/read/` - read-only dashboard API router and read-side agent/webhook handlers
 - `src/domains/operations/api/control/` - guarded mutation API router and control-side agent handlers
+- `src/domains/agent-runtime/api/read/` - V2 runtime read API for conversations, schedules, heartbeat, and memory
+- `src/domains/agent-runtime/api/control/` - V2 runtime control API for creating conversations, sending messages, managing schedules, updating heartbeat, and configuring memory
 - `tests/` - daemon unit and integration tests
 
 ## Agent discovery behavior
@@ -53,7 +56,41 @@ The daemon can discover agents from:
 When the runtime registry is missing, configured agents are used as a fallback so the
 dashboard can still list known workspaces.
 
+## V2 Agent Runtime API
+
+The daemon exposes V2 runtime endpoints for agent-bound conversations, schedules, heartbeat, and memory:
+
+Read endpoints:
+
+- `GET /api/agents/:agentId/conversations` - list agent conversations
+- `GET /api/conversations/:conversationId` - conversation detail
+- `GET /api/conversations/:conversationId/messages` - conversation messages
+- `GET /api/agents/:agentId/schedules` - list schedules
+- `GET /api/agents/:agentId/schedules/:jobId/runs` - schedule run history
+- `GET /api/agents/:agentId/heartbeat` - read heartbeat config
+- `GET /api/agents/:agentId/memory` - read memory bindings
+
+Control endpoints (require arming):
+
+- `POST /api/control/agents/:agentId/conversations/create` - create conversation
+- `POST /api/control/conversations/:conversationId/messages/send` - send message
+- `POST /api/control/conversations/:conversationId/archive` - archive conversation
+- `POST /api/control/agents/:agentId/schedules/create` - create schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/update` - update schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/run` - trigger schedule run
+- `POST /api/control/agents/:agentId/schedules/:jobId/remove` - remove schedule
+- `POST /api/control/agents/:agentId/heartbeat/update` - update heartbeat
+- `POST /api/control/agents/:agentId/memory/configure` - configure memory
+
+Runtime features:
+
+- **Conversation isolation** - conversations are scoped to agents with unique session keys
+- **Schedule management** - cron-based recurring prompts with execution history
+- **Heartbeat configuration** - periodic agent check-ins with `every`, `session`, and `lightContext` fields
+- **Memory bindings** - scoped memory attachments using `secretRef` and `apiKeyRef` only (no raw secrets)
+
 ## Notes
 
 - this service is intended for local trusted environments
 - end-to-end browser flows are tested from the repo-level Playwright suite
+- V2 runtime APIs reuse the same auth, arming window, idempotency replay, and audit-event persistence as other control APIs

@@ -12,6 +12,7 @@ Public-facing version posts and release blogs live under `news/`.
 ## Highlights
 
 - Agent Workspace entry at `/dashboard`
+- V2 Agent Runtime at `/agents/:agentId/runtime` with conversations, schedules, heartbeat, and memory
 - token-gated local login flow
 - agent cards with live status polling
 - 600px side drawer for workspace inspection
@@ -123,12 +124,48 @@ The daemon can discover agents from several sources:
 If the runtime session registry is missing, the daemon falls back to configured agents
 so the dashboard can still show known workspaces.
 
+## Agent Runtime (V2)
+
+The dashboard now includes a V2 Agent Runtime that lets you interact with agents through persistent conversations, scheduled jobs, heartbeat configuration, and memory bindings.
+
+Runtime routes:
+
+- `/agents/:agentId/runtime` - runtime shell with tabs for Conversations, Schedules, Heartbeat, and Memory
+- `/agents/:agentId/runtime/conversations/:conversationId` - specific conversation thread
+
+Runtime capabilities:
+
+- **Conversations** - create, list, and send messages in agent-bound threads with persistent history
+- **Schedules** - cron-based recurring prompts with run history
+- **Heartbeat** - periodic check-in configuration for agents
+- **Memory** - scoped memory bindings (conversation, agent, system) with secretRef-only credential handling
+
+Runtime API endpoints:
+
+- `GET /api/agents/:agentId/conversations` - list agent conversations
+- `GET /api/conversations/:conversationId` - conversation detail
+- `GET /api/conversations/:conversationId/messages` - conversation messages
+- `POST /api/control/agents/:agentId/conversations/create` - create conversation
+- `POST /api/control/conversations/:conversationId/messages/send` - send message
+- `POST /api/control/conversations/:conversationId/archive` - archive conversation
+- `GET /api/agents/:agentId/schedules` - list schedules
+- `GET /api/agents/:agentId/schedules/:jobId/runs` - schedule run history
+- `POST /api/control/agents/:agentId/schedules/create` - create schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/update` - update schedule
+- `POST /api/control/agents/:agentId/schedules/:jobId/run` - trigger schedule run
+- `POST /api/control/agents/:agentId/schedules/:jobId/remove` - remove schedule
+- `GET /api/agents/:agentId/heartbeat` - read heartbeat config
+- `POST /api/control/agents/:agentId/heartbeat/update` - update heartbeat
+- `GET /api/agents/:agentId/memory` - read memory bindings
+- `POST /api/control/agents/:agentId/memory/configure` - configure memory
+
 ## Frontend and API notes
 
 - the frontend uses React, React Router, Vite, and Tailwind via PostCSS
 - the daemon exposes read APIs and guarded control APIs for local trusted use
 - supported editable files are currently focused on markdown and plain text flows
 - Playwright covers the main Agent Workspace login, browse, edit, and save path
+- Playwright also covers V2 runtime flows including conversations, schedules, heartbeat, and memory
 
 ## Verification
 

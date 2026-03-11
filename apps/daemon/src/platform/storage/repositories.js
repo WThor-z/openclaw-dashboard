@@ -110,6 +110,28 @@ export function createStorageRepositories(db) {
     getSessionById: db.prepare(
       "SELECT id, workspace_id AS workspaceId, status, started_at AS startedAt, ended_at AS endedAt FROM sessions WHERE id = ? LIMIT 1"
     ),
+    insertConversation: db.prepare(
+      "INSERT INTO conversations(id, agent_id, workspace_id, session_key, title, status, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ),
+    listConversationsByAgent: db.prepare(
+      "SELECT c.id, c.agent_id AS agentId, c.workspace_id AS workspaceId, c.session_key AS sessionKey, c.title, c.status, c.created_at AS createdAt, c.updated_at AS updatedAt, c.archived_at AS archivedAt, message_stats.last_message_at AS lastMessageAt, coalesce(message_stats.message_count, 0) AS messageCount FROM conversations c LEFT JOIN (SELECT conversation_id, max(created_at) AS last_message_at, count(*) AS message_count FROM conversation_messages GROUP BY conversation_id) message_stats ON message_stats.conversation_id = c.id WHERE c.agent_id = ? ORDER BY c.updated_at DESC, c.id DESC"
+    ),
+    getConversationById: db.prepare(
+      "SELECT c.id, c.agent_id AS agentId, c.workspace_id AS workspaceId, c.session_key AS sessionKey, c.title, c.status, c.created_at AS createdAt, c.updated_at AS updatedAt, c.archived_at AS archivedAt, message_stats.last_message_at AS lastMessageAt, coalesce(message_stats.message_count, 0) AS messageCount FROM conversations c LEFT JOIN (SELECT conversation_id, max(created_at) AS last_message_at, count(*) AS message_count FROM conversation_messages GROUP BY conversation_id) message_stats ON message_stats.conversation_id = c.id WHERE c.id = ? LIMIT 1"
+    ),
+    touchConversation: db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?"),
+    archiveConversation: db.prepare(
+      "UPDATE conversations SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
+    ),
+    insertConversationMessage: db.prepare(
+      "INSERT INTO conversation_messages(id, conversation_id, role, state, content, error_code, external_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ),
+    listConversationMessagesByConversation: db.prepare(
+      "SELECT id, conversation_id AS conversationId, role, state, content, error_code AS errorCode, external_message_id AS externalMessageId, created_at AS createdAt, updated_at AS updatedAt FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at DESC, id DESC"
+    ),
+    completeAssistantMessage: db.prepare(
+      "UPDATE conversation_messages SET state = ?, content = ?, error_code = ?, external_message_id = ?, updated_at = ? WHERE id = ? AND role = 'assistant'"
+    ),
     insertTask: db.prepare(
       "INSERT INTO tasks(id, session_id, workspace_id, state, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ),
@@ -122,9 +144,7 @@ export function createStorageRepositories(db) {
     getTaskById: db.prepare(
       "SELECT id, session_id AS sessionId, workspace_id AS workspaceId, state, summary, created_at AS createdAt, updated_at AS updatedAt FROM tasks WHERE id = ? LIMIT 1"
     ),
-    updateTaskState: db.prepare(
-      "UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?"
-    ),
+    updateTaskState: db.prepare("UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?"),
     insertCostEntry: db.prepare(
       "INSERT INTO cost_entries(id, workspace_id, session_id, task_id, amount_usd, model, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
     ),
@@ -152,9 +172,7 @@ export function createStorageRepositories(db) {
     updateWebhook: db.prepare(
       "UPDATE webhooks SET endpoint_url = ?, secret_ref = ?, enabled = ?, updated_at = ? WHERE id = ?"
     ),
-    disableWebhook: db.prepare(
-      "UPDATE webhooks SET enabled = 0, updated_at = ? WHERE id = ?"
-    ),
+    disableWebhook: db.prepare("UPDATE webhooks SET enabled = 0, updated_at = ? WHERE id = ?"),
     updateWebhookBreaker: db.prepare(
       "UPDATE webhooks SET breaker_state = ?, consecutive_failures = ?, breaker_next_attempt_at = ?, updated_at = ? WHERE id = ?"
     ),
@@ -299,6 +317,88 @@ export function createStorageRepositories(db) {
       },
       getById(id) {
         return statements.getSessionById.get(id) ?? null;
+      }
+    },
+    conversations: {
+      insert(record) {
+        const conversationRecord = {
+          id: record.id,
+          agentId: record.agentId,
+          workspaceId: record.workspaceId,
+          sessionKey: record.sessionKey,
+          title: record.title,
+          status: record.status,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt ?? record.createdAt,
+          archivedAt: record.archivedAt ?? null
+        };
+        insertRecord(statements.insertConversation, conversationRecord);
+      },
+      listByAgent(agentId) {
+        return statements.listConversationsByAgent.all(agentId);
+      },
+      getById(id) {
+        return statements.getConversationById.get(id) ?? null;
+      },
+      touch({ id, updatedAt }) {
+        const result = statements.touchConversation.run(updatedAt, id);
+        return result.changes > 0;
+      },
+      archiveConversation({ id, archivedAt, updatedAt }) {
+        const result = statements.archiveConversation.run(archivedAt, updatedAt, id);
+        return result.changes > 0;
+      }
+    },
+    conversationMessages: {
+      insert(record) {
+        const messageRecord = {
+          id: record.id,
+          conversationId: record.conversationId,
+          role: record.role,
+          state: record.state,
+          content: record.content,
+          errorCode: record.errorCode ?? null,
+          externalMessageId: record.externalMessageId ?? null,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt ?? record.createdAt
+        };
+        insertRecord(statements.insertConversationMessage, messageRecord);
+      },
+      listByConversation(conversationId) {
+        return statements.listConversationMessagesByConversation.all(conversationId);
+      },
+      appendPendingAssistantMessage(record) {
+        const messageRecord = {
+          id: record.id,
+          conversationId: record.conversationId,
+          role: "assistant",
+          state: "pending",
+          content: record.content,
+          errorCode: null,
+          externalMessageId: record.externalMessageId ?? null,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt ?? record.createdAt
+        };
+        insertRecord(statements.insertConversationMessage, messageRecord);
+        return messageRecord;
+      },
+      completeAssistantMessage({
+        id,
+        state = "completed",
+        content,
+        errorCode = null,
+        externalMessageId = null,
+        updatedAt
+      }) {
+        const result = statements.completeAssistantMessage.run(
+          state,
+          content,
+          errorCode,
+          externalMessageId,
+          updatedAt,
+          id
+        );
+        return result.changes > 0;
       }
     },
     tasks: {
@@ -446,7 +546,15 @@ export function createStorageRepositories(db) {
         );
         return result.changes > 0;
       },
-      markRetry({ id, attemptCount, responseCode, attemptedAt, nextAttemptAt, lastError, updatedAt }) {
+      markRetry({
+        id,
+        attemptCount,
+        responseCode,
+        attemptedAt,
+        nextAttemptAt,
+        lastError,
+        updatedAt
+      }) {
         const result = statements.markWebhookDeliveryRetry.run(
           attemptCount,
           responseCode,

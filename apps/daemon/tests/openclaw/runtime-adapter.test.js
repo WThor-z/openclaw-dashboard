@@ -427,7 +427,40 @@ describe("openclaw runtime adapter", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("treats business-error JSON output as adapter failure even when HTTP is 200", async () => {
+  it("keeps non-deactivated upstream business errors on the gateway path", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          id: "resp-business-error",
+          output_text: '{"detail":{"code":"rate_limited","message":"too many requests"}}'
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+    const runCommand = vi.fn();
+    const adapter = createOpenclawRuntimeAdapter({
+      fetchImpl,
+      runCommand,
+      openclawModel: DEFAULT_MODEL
+    });
+
+    await expect(
+      adapter.messaging.send({
+        agentId: "agent-main",
+        sessionKey: "session-001",
+        content: "hello"
+      })
+    ).rejects.toMatchObject({
+      code: "OPENCLAW_UPSTREAM_RATE_LIMITED",
+      message: "too many requests"
+    });
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the OpenClaw agent CLI when gateway messaging reports deactivated workspace", async () => {
     const fetchImpl = vi.fn(async () => {
       return new Response(
         JSON.stringify({
@@ -440,22 +473,92 @@ describe("openclaw runtime adapter", () => {
         }
       );
     });
+    const runCommand = vi.fn(async () =>
+      createRunnerResult(
+        JSON.stringify({
+          id: "cli-msg-1",
+          result: {
+            payloads: [{ text: "hello from cli" }]
+          }
+        })
+      )
+    );
     const adapter = createOpenclawRuntimeAdapter({
       fetchImpl,
-      runCommand: vi.fn(),
-      openclawModel: DEFAULT_MODEL
+      runCommand,
+      openclawModel: DEFAULT_MODEL,
+      env: { OPENCLAW_MODEL: DEFAULT_MODEL },
+      resolvePreferredStateDir: async () => "/tmp/.openclaw",
+      resolveConfigCandidates: () => ["/tmp/.openclaw/openclaw.json"]
+    });
+
+    const response = await adapter.messaging.send({
+      agentId: "agent-main",
+      sessionKey: "dashboard:agent-main:conv-1",
+      content: "hello"
+    });
+
+    expect(response).toMatchObject({
+      id: "cli-msg-1",
+      outputText: "hello from cli"
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(runCommand.mock.calls[0][0]).toEqual([
+      "openclaw",
+      "agent",
+      "--agent",
+      "agent-main",
+      "--message",
+      "hello",
+      "--json"
+    ]);
+    expect(runCommand.mock.calls[0][0]).not.toContain("--non-interactive");
+    expect(runCommand.mock.calls[0][1]).toMatchObject({
+      cwd: "/tmp/.openclaw",
+      env: expect.objectContaining({
+        OPENCLAW_STATE_DIR: "/tmp/.openclaw",
+        OPENCLAW_CONFIG_PATH: "/tmp/.openclaw/openclaw.json"
+      })
+    });
+  });
+
+  it("surfaces normalized CLI errors when deactivated-workspace fallback also fails", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          id: "resp-business-error",
+          output_text: '{"detail":{"code":"deactivated_workspace"}}'
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
+    const runCommand = vi.fn(async () => {
+      return createRunnerResult("", 2, "cli agent failed");
+    });
+    const adapter = createOpenclawRuntimeAdapter({
+      fetchImpl,
+      runCommand,
+      openclawModel: DEFAULT_MODEL,
+      resolvePreferredStateDir: async () => "/tmp/.openclaw",
+      resolveConfigCandidates: () => ["/tmp/.openclaw/openclaw.json"]
     });
 
     await expect(
       adapter.messaging.send({
         agentId: "agent-main",
-        sessionKey: "session-001",
+        sessionKey: "dashboard:agent-main:conv-1",
         content: "hello"
       })
     ).rejects.toMatchObject({
-      code: "OPENCLAW_UPSTREAM_DEACTIVATED_WORKSPACE",
-      message: "deactivated_workspace"
+      code: "OPENCLAW_CLI_EXIT_2",
+      message: "cli agent failed"
     });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(runCommand).toHaveBeenCalledTimes(1);
   });
 
   it("wraps cron operations as non-interactive CLI calls", async () => {

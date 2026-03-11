@@ -74,6 +74,59 @@ function extractResponseOutputText(payload) {
   return chunks.join("\n");
 }
 
+function extractCliAgentOutputText(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+
+  const collections = [
+    Array.isArray(payload.result?.payloads) ? payload.result.payloads : [],
+    Array.isArray(payload.payloads) ? payload.payloads : [],
+    Array.isArray(payload.result?.output) ? payload.result.output : [],
+    Array.isArray(payload.output) ? payload.output : []
+  ];
+
+  const chunks = [];
+  for (const items of collections) {
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      if (typeof item.text === "string") {
+        chunks.push(item.text);
+        continue;
+      }
+
+      const content = Array.isArray(item.content) ? item.content : [];
+      for (const part of content) {
+        if (part && typeof part === "object" && typeof part.text === "string") {
+          chunks.push(part.text);
+        }
+      }
+    }
+  }
+
+  if (chunks.length > 0) {
+    return chunks.join("\n");
+  }
+
+  return (
+    asNonEmptyString(payload.result?.text) ??
+    asNonEmptyString(payload.text) ??
+    extractResponseOutputText(payload)
+  );
+}
+
+function extractCliAgentResponseId(payload) {
+  return (
+    asNonEmptyString(payload?.id) ??
+    asNonEmptyString(payload?.result?.id) ??
+    asNonEmptyString(payload?.message?.id) ??
+    null
+  );
+}
+
 function tryParseJsonObject(input) {
   if (typeof input !== "string") {
     return null;
@@ -267,8 +320,11 @@ export function createOpenclawRuntimeAdapter(options = {}) {
   const resolvePreferredStateDirImpl = options.resolvePreferredStateDir ?? resolvePreferredStateDir;
   const resolveConfigCandidatesImpl = options.resolveConfigCandidates ?? resolveConfigCandidates;
 
-  async function runCli(command, parseJson = true) {
-    const fullCommand = appendFlag(["openclaw", ...command], "--non-interactive");
+  async function runCli(command, parseJson = true, cliOptions = {}) {
+    const fullCommand = ["openclaw", ...command];
+    if (cliOptions.nonInteractive !== false) {
+      appendFlag(fullCommand, "--non-interactive");
+    }
 
     try {
       const context = await resolveCommandContext({
@@ -320,6 +376,34 @@ export function createOpenclawRuntimeAdapter(options = {}) {
 
   function resolveMessagingModel(model = undefined) {
     return asNonEmptyString(model) ?? openclawModel;
+  }
+
+  async function sendMessageViaCliFallback({ agentId, content }) {
+    const payload = await runCli(
+      ["agent", "--agent", agentId, "--message", content, "--json"],
+      true,
+      { nonInteractive: false }
+    );
+    const outputText = extractCliAgentOutputText(payload);
+    const businessError = extractBusinessError(payload, outputText);
+    if (businessError) {
+      throw normalizeOpenclawAdapterError(
+        {
+          code: `OPENCLAW_UPSTREAM_${makeErrorCode(businessError.code, "BUSINESS_ERROR")}`,
+          message: businessError.message
+        },
+        "OPENCLAW_UPSTREAM_BUSINESS_ERROR",
+        {
+          body: payload
+        }
+      );
+    }
+
+    return {
+      id: extractCliAgentResponseId(payload),
+      outputText,
+      raw: payload
+    };
   }
 
   async function sendMessage({ agentId, sessionKey, content, model = undefined }) {
@@ -396,7 +480,7 @@ export function createOpenclawRuntimeAdapter(options = {}) {
     const outputText = extractResponseOutputText(payload);
     const businessError = extractBusinessError(payload, outputText);
     if (businessError) {
-      throw normalizeOpenclawAdapterError(
+      const normalizedError = normalizeOpenclawAdapterError(
         {
           code: `OPENCLAW_UPSTREAM_${makeErrorCode(businessError.code, "BUSINESS_ERROR")}`,
           message: businessError.message
@@ -406,6 +490,15 @@ export function createOpenclawRuntimeAdapter(options = {}) {
           body: payload
         }
       );
+
+      if (normalizedError.code === "OPENCLAW_UPSTREAM_DEACTIVATED_WORKSPACE") {
+        return sendMessageViaCliFallback({
+          agentId: finalAgentId,
+          content: finalContent
+        });
+      }
+
+      throw normalizedError;
     }
 
     return {

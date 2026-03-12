@@ -315,26 +315,90 @@ function installRuntimeFetchMock(options?: {
         return createJsonResponse(200, {
           items: [
             {
-              id: `event-${conversationId}-send`,
-              source: "daemon",
+              id: `event-${conversationId}-user`,
+              source: "openclaw-native-transcript",
               sessionId: null,
               taskId: null,
               workspaceId: "ws-1",
               level: "info",
-              kind: "control.agent-runtime.messages.send",
+              kind: "message",
               payload: {
-                request: {
-                  content: "Hello runtime"
-                },
-                response: {
-                  status: 200,
-                  body: {
-                    conversationId
-                  }
+                type: "message",
+                message: {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: "Hello runtime"
+                    }
+                  ]
+                }
+              },
+              createdAt: "2026-03-10T00:00:01.000Z",
+              dedupeKey: `message:user:${conversationId}`
+            },
+            {
+              id: `event-${conversationId}-assistant`,
+              source: "openclaw-native-transcript",
+              sessionId: null,
+              taskId: null,
+              workspaceId: "ws-1",
+              level: "info",
+              kind: "message",
+              payload: {
+                type: "message",
+                message: {
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "thinking",
+                      thinking: "Checking the weather tool before answering."
+                    },
+                    {
+                      type: "toolCall",
+                      id: "call-weather-1",
+                      name: "get_weather",
+                      arguments: {
+                        city: "Shanghai"
+                      }
+                    },
+                    {
+                      type: "text",
+                      text: "The weather is ready."
+                    }
+                  ]
                 }
               },
               createdAt: "2026-03-10T00:00:02.000Z",
-              dedupeKey: `control.agent-runtime.messages.send:${conversationId}`
+              dedupeKey: `message:assistant:${conversationId}`
+            },
+            {
+              id: `event-${conversationId}-tool-result`,
+              source: "openclaw-native-transcript",
+              sessionId: null,
+              taskId: null,
+              workspaceId: "ws-1",
+              level: "info",
+              kind: "message",
+              payload: {
+                type: "message",
+                message: {
+                  role: "toolResult",
+                  toolName: "get_weather",
+                  content: [
+                    {
+                      type: "text",
+                      text: "Sunny, 26C"
+                    }
+                  ],
+                  details: {
+                    city: "Shanghai",
+                    temperatureC: 26
+                  }
+                }
+              },
+              createdAt: "2026-03-10T00:00:03.000Z",
+              dedupeKey: `message:tool-result:${conversationId}`
             }
           ],
           limit: 120,
@@ -827,8 +891,12 @@ describe("agent runtime routes", () => {
 
     fireEvent.click(screen.getByTestId("conversation-view-detailed-button"));
 
-    expect(await screen.findByText("control.agent-runtime.messages.send")).toBeTruthy();
+    expect(await screen.findByText("User Message")).toBeTruthy();
     expect(screen.getByText("Hello runtime")).toBeTruthy();
+    expect(screen.getByText("Assistant Step")).toBeTruthy();
+    expect(screen.getAllByText("get_weather").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Shanghai/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Sunny, 26C").length).toBeGreaterThan(0);
   });
 
   it("does not leak unsent draft text when switching to an archived conversation", async () => {

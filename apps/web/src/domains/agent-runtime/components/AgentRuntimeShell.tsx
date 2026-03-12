@@ -110,6 +110,19 @@ type RuntimeTimelineEvent = {
   kind: string;
   createdAt: string;
   payload?: unknown;
+  source?: string | null;
+};
+
+type TimelineDisplayBlock = {
+  label: string;
+  content: string;
+  tone: "default" | "muted" | "accent";
+};
+
+type TimelineDisplayEntry = {
+  heading: string;
+  eyebrow: string;
+  blocks: TimelineDisplayBlock[];
 };
 
 type NormalizedMemoryState = {
@@ -260,6 +273,149 @@ function summarizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn) {
     readNonEmptyString(requestRecord?.content);
 
   return explicitMessage ?? t("runtime.conversations.timelineDefaultSummary");
+}
+
+function toPrettyJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function readTextParts(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return value
+    .map((item) => {
+      const record = asRecord(item);
+      if (!record || readNonEmptyString(record.type) !== "text") {
+        return null;
+      }
+
+      return readNonEmptyString(record.text);
+    })
+    .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function normalizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn): TimelineDisplayEntry {
+  const payloadRecord = asRecord(event.payload);
+  const messageRecord = asRecord(payloadRecord?.message);
+  const role = readNonEmptyString(messageRecord?.role);
+  const contentParts = Array.isArray(messageRecord?.content) ? messageRecord.content : [];
+
+  if (!messageRecord || !role) {
+    return {
+      heading: event.kind,
+      eyebrow: t("runtime.conversations.timeline.event"),
+      blocks: [
+        {
+          label: t("runtime.conversations.timeline.summary"),
+          content: summarizeTimelineEvent(event, t),
+          tone: "default"
+        }
+      ]
+    };
+  }
+
+  const blocks: TimelineDisplayBlock[] = [];
+  for (const part of contentParts) {
+    const partRecord = asRecord(part);
+    if (!partRecord) {
+      continue;
+    }
+
+    const partType = readNonEmptyString(partRecord.type);
+    if (partType === "text") {
+      const text = readNonEmptyString(partRecord.text);
+      if (text) {
+        blocks.push({
+          label: t("runtime.conversations.timeline.text"),
+          content: text,
+          tone: "default"
+        });
+      }
+      continue;
+    }
+
+    if (partType === "thinking") {
+      const thinking = readNonEmptyString(partRecord.thinking);
+      if (thinking) {
+        blocks.push({
+          label: t("runtime.conversations.timeline.thinking"),
+          content: thinking,
+          tone: "muted"
+        });
+      }
+      continue;
+    }
+
+    if (partType === "toolCall") {
+      const toolName =
+        readNonEmptyString(partRecord.name) ?? t("runtime.conversations.timeline.toolCall");
+      blocks.push({
+        label: toolName,
+        content:
+          partRecord.arguments === undefined
+            ? t("runtime.conversations.timeline.noArguments")
+            : toPrettyJson(partRecord.arguments),
+        tone: "accent"
+      });
+    }
+  }
+
+  if (role === "toolResult") {
+    const toolName =
+      readNonEmptyString(messageRecord.toolName) ?? t("runtime.conversations.timeline.toolResult");
+    const textParts = readTextParts(messageRecord.content);
+    if (textParts.length > 0) {
+      blocks.push({
+        label: toolName,
+        content: textParts.join("\n\n"),
+        tone: "accent"
+      });
+    }
+
+    if (messageRecord.details !== undefined) {
+      blocks.push({
+        label: t("runtime.conversations.timeline.details"),
+        content: toPrettyJson(messageRecord.details),
+        tone: "muted"
+      });
+    }
+  }
+
+  if (blocks.length === 0) {
+    blocks.push({
+      label: t("runtime.conversations.timeline.summary"),
+      content: summarizeTimelineEvent(event, t),
+      tone: "default"
+    });
+  }
+
+  const eyebrow =
+    role === "assistant"
+      ? t("runtime.conversations.timeline.role.assistant")
+      : role === "user"
+        ? t("runtime.conversations.timeline.role.user")
+        : role === "toolResult"
+          ? t("runtime.conversations.timeline.role.toolResult")
+          : role;
+
+  return {
+    heading:
+      role === "assistant"
+        ? t("runtime.conversations.timeline.assistantStep")
+        : role === "user"
+          ? t("runtime.conversations.timeline.userStep")
+          : role === "toolResult"
+            ? t("runtime.conversations.timeline.toolResultStep")
+            : event.kind,
+    eyebrow,
+    blocks
+  };
 }
 
 function createDefaultMemoryFormState(): MemoryFormState {
@@ -786,7 +942,7 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
       const body = (await response.json()) as { items?: RuntimeTimelineEvent[] };
       const allItems = Array.isArray(body.items) ? body.items : [];
       const timelineItems = allItems.sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt)
+        left.createdAt.localeCompare(right.createdAt)
       );
       setConversationTimelineEvents(timelineItems);
     } catch (error) {
@@ -1674,23 +1830,60 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                             {t("runtime.conversations.timelineEmpty")}
                           </p>
                         ) : (
-                          conversationTimelineEvents.map((event) => (
-                            <article
-                              key={event.id}
-                              data-testid={`conversation-timeline-row-${event.id}`}
-                              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
-                                  {event.kind}
-                                </p>
-                                <p className="text-[10px] text-slate-500">{event.createdAt}</p>
-                              </div>
-                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                                {summarizeTimelineEvent(event, t)}
-                              </p>
-                            </article>
-                          ))
+                          conversationTimelineEvents.map((event) => {
+                            const entry = normalizeTimelineEvent(event, t);
+                            return (
+                              <article
+                                key={event.id}
+                                data-testid={`conversation-timeline-row-${event.id}`}
+                                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                                      {entry.eyebrow}
+                                    </p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-800">
+                                      {entry.heading}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    <p className="text-[10px] text-slate-500">{event.createdAt}</p>
+                                    {event.source ? (
+                                      <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+                                        {event.source}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                  {entry.blocks.map((block) => (
+                                    <div
+                                      key={`${event.id}-${block.label}-${block.content.slice(0, 32)}`}
+                                      className={`rounded-md border px-3 py-2 ${
+                                        block.tone === "accent"
+                                          ? "border-[#1f5ba6]/20 bg-[#eef5ff]/70"
+                                          : "border-slate-200 bg-white"
+                                      }`}
+                                    >
+                                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                                        {block.label}
+                                      </p>
+                                      <pre
+                                        className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700"
+                                        style={{
+                                          fontFamily:
+                                            block.tone === "accent" ? "var(--font-mono)" : undefined
+                                        }}
+                                      >
+                                        {block.content}
+                                      </pre>
+                                    </div>
+                                  ))}
+                                </div>
+                              </article>
+                            );
+                          })
                         )
                       ) : threadMessages.length === 0 &&
                         conversationId &&
@@ -1923,6 +2116,9 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                                     resolvedAssistant
                                   ]);
                                 });
+                                if (conversationViewMode === "detailed") {
+                                  void loadConversationTimeline();
+                                }
                               } catch (error) {
                                 const message =
                                   error instanceof Error
@@ -1950,6 +2146,9 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                                     })
                                   )
                                 );
+                                if (conversationViewMode === "detailed") {
+                                  void loadConversationTimeline();
+                                }
                               } finally {
                                 setIsSendingMessage(false);
                               }

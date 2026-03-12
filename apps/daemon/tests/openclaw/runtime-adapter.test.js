@@ -605,11 +605,23 @@ describe("openclaw runtime adapter", () => {
   });
 
   it("lists sessions through OpenClaw CLI JSON output", async () => {
+    const now = Date.now();
     const runCommand = vi.fn(async () =>
       createRunnerResult(
         JSON.stringify({
           path: "/tmp/.openclaw/sessions.json",
-          sessions: [{ key: "main", transcriptPath: "/tmp/.openclaw/main.jsonl" }]
+          sessions: [
+            {
+              key: "main",
+              transcriptPath: "/tmp/.openclaw/main.jsonl",
+              updatedAt: now - 60 * 1000
+            },
+            {
+              key: "stale",
+              transcriptPath: "/tmp/.openclaw/stale.jsonl",
+              updatedAt: now - 240 * 60 * 1000
+            }
+          ]
         })
       )
     );
@@ -626,21 +638,14 @@ describe("openclaw runtime adapter", () => {
 
     expect(payload.sessions).toHaveLength(1);
     expect(payload.sessions[0]).toMatchObject({ key: "main" });
+    expect(payload.count).toBe(1);
     expect(runCommand).toHaveBeenCalledTimes(1);
     expect(runCommand.mock.calls[0][0]).toEqual(
-      expect.arrayContaining([
-        "openclaw",
-        "sessions",
-        "--agent",
-        "agent-main",
-        "--active",
-        "120",
-        "--limit",
-        "30",
-        "--json",
-        "--non-interactive"
-      ])
+      expect.arrayContaining(["openclaw", "sessions", "--agent", "agent-main", "--json"])
     );
+    expect(runCommand.mock.calls[0][0]).not.toContain("--active");
+    expect(runCommand.mock.calls[0][0]).not.toContain("--limit");
+    expect(runCommand.mock.calls[0][0]).not.toContain("--non-interactive");
   });
 
   it("validates config before applying heartbeat updates", async () => {

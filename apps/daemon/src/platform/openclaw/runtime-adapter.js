@@ -670,14 +670,30 @@ export function createOpenclawRuntimeAdapter(options = {}) {
         if (allAgents) {
           command.push("--all-agents");
         }
-        if (Number.isInteger(activeMinutes) && activeMinutes > 0) {
-          command.push("--active", String(activeMinutes));
-        }
-        if (Number.isInteger(limit) && limit > 0) {
-          command.push("--limit", String(limit));
-        }
         command.push("--json");
-        return runCli(command);
+        return runCli(command, true, { nonInteractive: false }).then((payload) => {
+          const sessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+          const filteredByActive =
+            Number.isInteger(activeMinutes) && activeMinutes > 0
+              ? sessions.filter((item) => {
+                  if (typeof item?.updatedAt !== "number" || !Number.isFinite(item.updatedAt)) {
+                    return true;
+                  }
+
+                  return Date.now() - item.updatedAt <= activeMinutes * 60 * 1000;
+                })
+              : sessions;
+          const limited =
+            Number.isInteger(limit) && limit > 0
+              ? filteredByActive.slice(0, limit)
+              : filteredByActive;
+
+          return {
+            ...payload,
+            sessions: limited,
+            count: limited.length
+          };
+        });
       }
     }
   };

@@ -1055,7 +1055,12 @@ describe("agent runtime routes", () => {
     const sessionRow = await screen.findByTestId("conversation-timeline-row-event-session");
     const customRow = screen.getByTestId("conversation-timeline-row-event-custom");
     const thinkingRow = screen.getByTestId("conversation-timeline-row-event-thinking-level");
+    const modelChangeRow = screen.getByTestId("conversation-timeline-row-event-model-change");
     expect(screen.queryByText("No event summary available.")).toBeNull();
+    expect(sessionRow.textContent).toContain("Session");
+    expect(customRow.textContent).toContain("Custom Event");
+    expect(thinkingRow.textContent).toContain("Thinking Level Changed");
+    expect(modelChangeRow.textContent).toContain("Model Changed");
     expect(sessionRow.textContent).toContain("/tmp/agent-workspace");
     expect(customRow.textContent).toContain("model-snapshot");
     expect(customRow.textContent).toContain("kimi-k2.5");

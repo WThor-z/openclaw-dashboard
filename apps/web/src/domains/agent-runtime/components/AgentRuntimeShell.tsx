@@ -383,6 +383,29 @@ function buildSystemTimelineBlocks(
   return [];
 }
 
+function translateSystemTimelineHeading(event: RuntimeTimelineEvent, t: TranslateFn) {
+  const payloadRecord = asRecord(event.payload);
+  const eventType = readNonEmptyString(payloadRecord?.type) ?? event.kind;
+
+  if (eventType === "session") {
+    return t("runtime.conversations.timeline.system.session");
+  }
+
+  if (eventType === "custom") {
+    return t("runtime.conversations.timeline.system.custom");
+  }
+
+  if (eventType === "thinking_level_change") {
+    return t("runtime.conversations.timeline.system.thinkingLevelChange");
+  }
+
+  if (eventType === "model_change") {
+    return t("runtime.conversations.timeline.system.modelChange");
+  }
+
+  return event.kind;
+}
+
 function toPrettyJson(value: unknown) {
   try {
     return JSON.stringify(value, null, 2);
@@ -417,7 +440,7 @@ function normalizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn): Ti
   if (!messageRecord || !role) {
     const blocks = buildSystemTimelineBlocks(event, t);
     return {
-      heading: event.kind,
+      heading: translateSystemTimelineHeading(event, t),
       eyebrow: t("runtime.conversations.timeline.event"),
       blocks:
         blocks.length > 0

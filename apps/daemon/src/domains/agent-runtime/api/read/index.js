@@ -1,6 +1,7 @@
 import { HttpError, sendJson } from "../../../../shared/middleware/error-handler.js";
 import { parseAndRedactJson, redactSecrets } from "../../../../shared/redaction.js";
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 function decodeSegmentOrThrow(value) {
   try {
@@ -102,6 +103,21 @@ function toIsoTimestamp(value, fallbackIndex) {
   return new Date(0 + fallbackIndex).toISOString();
 }
 
+function toEpochMs(value, fallbackIndex) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallbackIndex;
+}
+
 function toTranscriptTimelineItem(eventValue, index, conversation) {
   const eventRecord = asRecord(eventValue);
   const kind =
@@ -148,20 +164,54 @@ async function readTranscriptTimelineItems(transcriptPath, conversation, limit) 
     }
   }
 
+  const createdAtThreshold = Number.isFinite(Date.parse(conversation.createdAt))
+    ? Date.parse(conversation.createdAt)
+    : 0;
   const selected = parsedEvents
+    .map((eventValue, index) => ({
+      eventValue,
+      index,
+      ts: toEpochMs(
+        asRecord(eventValue)?.timestamp ??
+          asRecord(eventValue)?.createdAt ??
+          asRecord(eventValue)?.ts,
+        index
+      )
+    }))
+    .filter((item) => item.ts >= createdAtThreshold)
     .slice(-limit)
-    .map((eventValue, index) => toTranscriptTimelineItem(eventValue, index, conversation));
+    .map((item) => toTranscriptTimelineItem(item.eventValue, item.index, conversation));
 
   return selected.reverse();
 }
 
 function resolveSessionRowByConversation({ sessionsPayload, conversation }) {
   const rows = Array.isArray(sessionsPayload?.sessions) ? sessionsPayload.sessions : [];
+  const dashboardSessionPrefix = `dashboard:${conversation.agentId}:`;
+  const mainSessionKey = `agent:${conversation.agentId}:main`;
   return (
     rows.find((row) => readNonEmptyString(row?.key) === conversation.sessionKey) ??
+    (conversation.sessionKey.startsWith(dashboardSessionPrefix)
+      ? (rows.find((row) => readNonEmptyString(row?.key) === mainSessionKey) ?? null)
+      : null) ??
     rows.find((row) => readNonEmptyString(row?.sessionId) === conversation.id) ??
     null
   );
+}
+
+function resolveTranscriptPath({ sessionsPayload, sessionRow }) {
+  const explicitPath = readNonEmptyString(sessionRow?.transcriptPath);
+  if (explicitPath) {
+    return explicitPath;
+  }
+
+  const sessionsPath = readNonEmptyString(sessionsPayload?.path);
+  const sessionId = readNonEmptyString(sessionRow?.sessionId);
+  if (!sessionsPath || !sessionId) {
+    return null;
+  }
+
+  return join(dirname(sessionsPath), `${sessionId}.jsonl`);
 }
 
 async function readNativeConversationTimeline(openclawRuntimeAdapter, conversation, limit) {
@@ -175,7 +225,7 @@ async function readNativeConversationTimeline(openclawRuntimeAdapter, conversati
     allAgents: false
   });
   const sessionRow = resolveSessionRowByConversation({ sessionsPayload, conversation });
-  const transcriptPath = readNonEmptyString(sessionRow?.transcriptPath);
+  const transcriptPath = sessionRow ? resolveTranscriptPath({ sessionsPayload, sessionRow }) : null;
   if (!transcriptPath) {
     return null;
   }
@@ -401,7 +451,8 @@ async function readConversationTimeline(
   return {
     items: timelineItems,
     limit: maxItems,
-    conversationId
+    conversationId,
+    source: "daemon-events"
   };
 }
 

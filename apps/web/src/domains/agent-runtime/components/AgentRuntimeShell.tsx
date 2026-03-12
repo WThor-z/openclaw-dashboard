@@ -120,6 +120,7 @@ type TimelineDisplayBlock = {
 };
 
 type TimelineDisplayEntry = {
+  variant: "system" | "message";
   heading: string;
   eyebrow: string;
   blocks: TimelineDisplayBlock[];
@@ -431,6 +432,23 @@ function readTextParts(value: unknown) {
     .filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
+function shouldPromoteTimelineBlock(
+  entry: TimelineDisplayEntry,
+  block: TimelineDisplayBlock,
+  index: number,
+  t: TranslateFn
+) {
+  if (index !== 0 || block.tone !== "default") {
+    return false;
+  }
+
+  return (
+    entry.variant === "system" ||
+    block.label === t("runtime.conversations.timeline.summary") ||
+    block.label === t("runtime.conversations.timeline.text")
+  );
+}
+
 function normalizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn): TimelineDisplayEntry {
   const payloadRecord = asRecord(event.payload);
   const messageRecord = asRecord(payloadRecord?.message);
@@ -440,6 +458,7 @@ function normalizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn): Ti
   if (!messageRecord || !role) {
     const blocks = buildSystemTimelineBlocks(event, t);
     return {
+      variant: "system",
       heading: translateSystemTimelineHeading(event, t),
       eyebrow: t("runtime.conversations.timeline.event"),
       blocks:
@@ -540,6 +559,7 @@ function normalizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn): Ti
           : role;
 
   return {
+    variant: "message",
     heading:
       role === "assistant"
         ? t("runtime.conversations.timeline.assistantStep")
@@ -1969,7 +1989,7 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                         </div>
                       </div>
                     ) : null}
-                    <div className="flex-1 space-y-2 overflow-y-auto p-4">
+                    <div className="flex-1 space-y-3 overflow-y-auto p-4">
                       {isThreadLoading ? (
                         <p className="text-xs text-slate-500">
                           {t("runtime.conversations.threadLoading")}
@@ -2000,55 +2020,90 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                         ) : (
                           conversationTimelineEvents.map((event) => {
                             const entry = normalizeTimelineEvent(event, t);
+                            const promotedBlockIndex = entry.blocks.findIndex((block, index) =>
+                              shouldPromoteTimelineBlock(entry, block, index, t)
+                            );
+                            const promotedBlock =
+                              promotedBlockIndex >= 0 ? entry.blocks[promotedBlockIndex] : null;
+                            const supportBlocks = entry.blocks.filter(
+                              (_, index) => index !== promotedBlockIndex
+                            );
                             return (
                               <article
                                 key={event.id}
                                 data-testid={`conversation-timeline-row-${event.id}`}
-                                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3"
+                                className={`rounded-xl border px-3.5 py-3.5 sm:px-4 sm:py-4 ${
+                                  entry.variant === "system"
+                                    ? "border-slate-200/80 bg-slate-50/70"
+                                    : "border-slate-200/90 bg-white shadow-sm"
+                                }`}
                               >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div>
-                                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                                      {entry.eyebrow}
-                                    </p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-800">
-                                      {entry.heading}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    <p className="text-[10px] text-slate-500">{event.createdAt}</p>
-                                    {event.source ? (
-                                      <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-400">
-                                        {event.source}
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                                  <div className="min-w-0 flex-1 space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                                      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                        {entry.eyebrow}
+                                      </p>
+                                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                        {entry.heading}
+                                      </p>
+                                    </div>
+                                    {promotedBlock ? (
+                                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-800 sm:text-[15px]">
+                                        {promotedBlock.content}
                                       </p>
                                     ) : null}
                                   </div>
+                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] font-medium uppercase tracking-[0.16em] text-slate-400 sm:justify-end sm:text-right">
+                                    <p>{event.createdAt}</p>
+                                    {event.source ? <p>{event.source}</p> : null}
+                                  </div>
                                 </div>
-                                <div className="mt-3 space-y-2">
-                                  {entry.blocks.map((block) => (
-                                    <div
-                                      key={`${event.id}-${block.label}-${block.content.slice(0, 32)}`}
-                                      className={`rounded-md border px-3 py-2 ${
-                                        block.tone === "accent"
-                                          ? "border-[#1f5ba6]/20 bg-[#eef5ff]/70"
-                                          : "border-slate-200 bg-white"
-                                      }`}
-                                    >
-                                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
-                                        {block.label}
-                                      </p>
-                                      <pre
-                                        className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700"
-                                        style={{
-                                          fontFamily:
-                                            block.tone === "accent" ? "var(--font-mono)" : undefined
-                                        }}
-                                      >
-                                        {block.content}
-                                      </pre>
-                                    </div>
-                                  ))}
-                                </div>
+                                {supportBlocks.length > 0 ? (
+                                  <div className="mt-3.5 space-y-2.5 border-t border-slate-200/70 pt-3">
+                                    {supportBlocks.map((block) => {
+                                      const isQuietSupport =
+                                        entry.variant === "system" || block.tone === "muted";
+                                      const isCodeLike =
+                                        block.tone === "accent" ||
+                                        block.label === t("runtime.conversations.timeline.details");
+                                      return (
+                                        <div
+                                          key={`${event.id}-${block.label}-${block.content.slice(0, 32)}`}
+                                          className={`rounded-xl border px-3 py-2.5 ${
+                                            entry.variant === "system"
+                                              ? "border-slate-200/80 bg-slate-50/80"
+                                              : block.tone === "accent"
+                                                ? "border-[#1f5ba6]/15 bg-[#eef5ff]/60"
+                                                : isQuietSupport
+                                                  ? "border-slate-200/80 bg-slate-50/80"
+                                                  : "border-slate-200/80 bg-white/90"
+                                          }`}
+                                        >
+                                          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                                            {block.label}
+                                          </p>
+                                          <pre
+                                            className={`mt-1.5 whitespace-pre-wrap break-words ${
+                                              isCodeLike
+                                                ? "text-xs leading-5 text-slate-600"
+                                                : isQuietSupport
+                                                  ? "text-xs leading-5 text-slate-600"
+                                                  : "text-sm leading-6 text-slate-700"
+                                            }`}
+                                            style={{
+                                              fontFamily: isCodeLike
+                                                ? "var(--font-mono)"
+                                                : undefined
+                                            }}
+                                          >
+                                            {block.content}
+                                          </pre>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
                               </article>
                             );
                           })
@@ -2063,31 +2118,31 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                         threadMessages.map((message) => (
                           <article
                             key={message.id}
-                            className={`rounded-lg border px-3 py-2 ${
+                            className={`rounded-xl border px-3.5 py-3 sm:px-4 sm:py-3.5 ${
                               message.role === "user"
-                                ? "border-slate-200 bg-slate-50"
-                                : "border-[#1f5ba6]/20 bg-[#eef5ff]/55"
+                                ? "border-slate-200/90 bg-slate-50/85"
+                                : "border-[#1f5ba6]/15 bg-[#eef5ff]/60"
                             }`}
                           >
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
                                 {translateMessageRole(message.role, t)}
                               </p>
                               {message.role === "assistant" ? (
                                 <span
-                                  className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${
+                                  className={`inline-flex self-start rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] ${
                                     message.state === "failed"
-                                      ? "text-rose-700"
+                                      ? "border-rose-200 bg-rose-50 text-rose-700"
                                       : message.state === "pending"
-                                        ? "text-amber-700"
-                                        : "text-emerald-700"
+                                        ? "border-amber-200 bg-amber-50 text-amber-700"
+                                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
                                   }`}
                                 >
                                   {translateMessageState(message.state, t)}
                                 </span>
                               ) : null}
                             </div>
-                            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                            <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
                               {message.content.length > 0
                                 ? message.content
                                 : message.role === "assistant" && message.state === "pending"

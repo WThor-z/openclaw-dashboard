@@ -716,6 +716,140 @@ describe("agent runtime APIs", () => {
     });
   });
 
+  it("creates conversation without title using default 'New conversation'", async () => {
+    const repositories = createFixtureRepositories();
+    const runtimeAdapter = createRuntimeAdapter();
+    const server = await startServer({ repositories, openclawRuntimeAdapter: runtimeAdapter });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const createResponse = await fetch(
+      `${baseUrl}/api/control/agents/${encodeURIComponent("agent-1")}/conversations/create`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-conversation-create-no-title-1"
+        }),
+        body: JSON.stringify({ workspaceId: "ws-1" })
+      }
+    );
+    const createBody = await createResponse.json();
+
+    expect(createResponse.status).toBe(200);
+    expect(createBody.ok).toBe(true);
+    expect(createBody.conversation).toMatchObject({
+      agentId: "agent-1",
+      workspaceId: "ws-1",
+      title: "New conversation",
+      status: "active"
+    });
+  });
+
+  it("updates title from default to first non-empty user message on send", async () => {
+    const repositories = createFixtureRepositories();
+    const runtimeAdapter = createRuntimeAdapter();
+    const server = await startServer({ repositories, openclawRuntimeAdapter: runtimeAdapter });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const createResponse = await fetch(
+      `${baseUrl}/api/control/agents/${encodeURIComponent("agent-1")}/conversations/create`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-conversation-create-title-update-1"
+        }),
+        body: JSON.stringify({ workspaceId: "ws-1" })
+      }
+    );
+    const createBody = await createResponse.json();
+    expect(createBody.conversation.title).toBe("New conversation");
+
+    const conversationId = createBody.conversation.id;
+
+    const sendResponse = await fetch(
+      `${baseUrl}/api/control/conversations/${encodeURIComponent(conversationId)}/messages/send`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-send-title-update-1"
+        }),
+        body: JSON.stringify({ content: "Hello, this is my first message to the assistant" })
+      }
+    );
+    expect(sendResponse.status).toBe(200);
+
+    const detailResponse = await fetch(
+      `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}`,
+      { headers: authorizedHeaders() }
+    );
+    const detailBody = await detailResponse.json();
+    expect(detailBody.conversation.title).toBe("Hello, this is my first message to the assistant");
+  });
+
+  it("does not overwrite a non-default title on subsequent sends", async () => {
+    const repositories = createFixtureRepositories();
+    const runtimeAdapter = createRuntimeAdapter();
+    const server = await startServer({ repositories, openclawRuntimeAdapter: runtimeAdapter });
+    const baseUrl = endpointFrom(server.address());
+
+    await armWrites(baseUrl);
+
+    const createResponse = await fetch(
+      `${baseUrl}/api/control/agents/${encodeURIComponent("agent-1")}/conversations/create`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-conversation-create-persist-title-1"
+        }),
+        body: JSON.stringify({ workspaceId: "ws-1", title: "Custom Title" })
+      }
+    );
+    const createBody = await createResponse.json();
+    expect(createBody.conversation.title).toBe("Custom Title");
+
+    const conversationId = createBody.conversation.id;
+
+    const firstSendResponse = await fetch(
+      `${baseUrl}/api/control/conversations/${encodeURIComponent(conversationId)}/messages/send`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-send-persist-title-1"
+        }),
+        body: JSON.stringify({ content: "First message should not change title" })
+      }
+    );
+    expect(firstSendResponse.status).toBe(200);
+
+    const secondSendResponse = await fetch(
+      `${baseUrl}/api/control/conversations/${encodeURIComponent(conversationId)}/messages/send`,
+      {
+        method: "POST",
+        headers: authorizedHeaders({
+          "content-type": "application/json",
+          "idempotency-key": "runtime-send-persist-title-2"
+        }),
+        body: JSON.stringify({ content: "Second message should also not change title" })
+      }
+    );
+    expect(secondSendResponse.status).toBe(200);
+
+    const detailResponse = await fetch(
+      `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}`,
+      { headers: authorizedHeaders() }
+    );
+    const detailBody = await detailResponse.json();
+    expect(detailBody.conversation.title).toBe("Custom Title");
+  });
+
   it("returns a safe validation error with request id when memory config is invalid", async () => {
     const repositories = createFixtureRepositories();
     const runtimeAdapter = createRuntimeAdapter({

@@ -123,6 +123,9 @@ export function createStorageRepositories(db) {
     archiveConversation: db.prepare(
       "UPDATE conversations SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?"
     ),
+    setConversationTitle: db.prepare(
+      "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?"
+    ),
     insertConversationMessage: db.prepare(
       "INSERT INTO conversation_messages(id, conversation_id, role, state, content, error_code, external_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ),
@@ -347,6 +350,10 @@ export function createStorageRepositories(db) {
       },
       archiveConversation({ id, archivedAt, updatedAt }) {
         const result = statements.archiveConversation.run(archivedAt, updatedAt, id);
+        return result.changes > 0;
+      },
+      setTitle({ id, title, updatedAt }) {
+        const result = statements.setConversationTitle.run(title, updatedAt, id);
         return result.changes > 0;
       }
     },

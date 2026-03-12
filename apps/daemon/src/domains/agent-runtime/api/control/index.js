@@ -167,6 +167,23 @@ function touchConversation(repositories, conversationId, updatedAt) {
   repositories.conversations.touch({ id: conversationId, updatedAt });
 }
 
+function maybeSetTitleFromFirstMessage(repositories, conversation, userContent, updatedAt) {
+  const DEFAULT_TITLE = "New conversation";
+  if (
+    conversation.title !== DEFAULT_TITLE &&
+    conversation.title !== null &&
+    conversation.title !== ""
+  ) {
+    return;
+  }
+  if (typeof repositories?.conversations?.setTitle !== "function") {
+    return;
+  }
+  const newTitle = userContent.slice(0, 100);
+  repositories.conversations.setTitle({ id: conversation.id, title: newTitle, updatedAt });
+  conversation.title = newTitle;
+}
+
 async function callAdapter(action) {
   try {
     return await action();
@@ -214,6 +231,7 @@ async function sendConversationMessage({
     externalMessageId: null
   });
   touchConversation(repositories, conversation.id, createdAt);
+  maybeSetTitleFromFirstMessage(repositories, conversation, content, createdAt);
 
   try {
     const adapterResponse = await openclawRuntimeAdapter.messaging.send({
@@ -313,7 +331,10 @@ export function createAgentRuntimeControlApi({
               "WORKSPACE_ID_REQUIRED",
               "workspaceId is required"
             );
-            const title = readNonEmptyString(body.title, "TITLE_REQUIRED", "title is required");
+            const title =
+              typeof body.title === "string" && body.title.trim().length > 0
+                ? body.title.trim()
+                : "New conversation";
             const model = await resolveConversationModelSnapshot({
               agentId: route.agentId,
               resolveAgentModel,

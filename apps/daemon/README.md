@@ -65,6 +65,7 @@ Read endpoints:
 - `GET /api/agents/:agentId/conversations` - list agent conversations
 - `GET /api/conversations/:conversationId` - conversation detail
 - `GET /api/conversations/:conversationId/messages` - conversation messages
+- `GET /api/conversations/:conversationId/timeline` - conversation timeline events for detailed view
 - `GET /api/agents/:agentId/schedules` - list schedules
 - `GET /api/agents/:agentId/schedules/:jobId/runs` - schedule run history
 - `GET /api/agents/:agentId/heartbeat` - read heartbeat config

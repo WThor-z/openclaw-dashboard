@@ -14,6 +14,7 @@ import type {
 } from "../../../../../../packages/shared/src/types.js";
 
 type RuntimeTabId = "conversations" | "schedules" | "heartbeat" | "memory";
+type ConversationViewMode = "compact" | "detailed";
 
 type RuntimeTab = {
   id: RuntimeTabId;
@@ -104,6 +105,13 @@ type RuntimeMemorySummary = {
   scopes?: RuntimeMemoryScopeEntry[] | Record<string, RuntimeMemoryScopeEntry> | null;
 };
 
+type RuntimeTimelineEvent = {
+  id: string;
+  kind: string;
+  createdAt: string;
+  payload?: unknown;
+};
+
 type NormalizedMemoryState = {
   workspaceId: string;
   form: MemoryFormState;
@@ -189,6 +197,69 @@ function createDefaultScheduleFormState(): ScheduleFormState {
 
 function readNonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readConversationIdFromEventPayload(payload: unknown): string | null {
+  const payloadRecord = asRecord(payload);
+  if (!payloadRecord) {
+    return null;
+  }
+
+  const directConversationId = readNonEmptyString(payloadRecord.conversationId);
+  if (directConversationId) {
+    return directConversationId;
+  }
+
+  const requestRecord = asRecord(payloadRecord.request);
+  const requestConversationId = readNonEmptyString(requestRecord?.conversationId);
+  if (requestConversationId) {
+    return requestConversationId;
+  }
+
+  const responseRecord = asRecord(payloadRecord.response);
+  const bodyRecord = asRecord(responseRecord?.body);
+  const bodyConversationId = readNonEmptyString(bodyRecord?.conversationId);
+  if (bodyConversationId) {
+    return bodyConversationId;
+  }
+
+  const conversationRecord = asRecord(bodyRecord?.conversation);
+  const conversationConversationId = readNonEmptyString(conversationRecord?.id);
+  if (conversationConversationId) {
+    return conversationConversationId;
+  }
+
+  const userMessageRecord = asRecord(bodyRecord?.userMessage);
+  const userMessageConversationId = readNonEmptyString(userMessageRecord?.conversationId);
+  if (userMessageConversationId) {
+    return userMessageConversationId;
+  }
+
+  const assistantMessageRecord = asRecord(bodyRecord?.assistantMessage);
+  return readNonEmptyString(assistantMessageRecord?.conversationId);
+}
+
+function summarizeTimelineEvent(event: RuntimeTimelineEvent, t: TranslateFn) {
+  const payloadRecord = asRecord(event.payload);
+  const responseRecord = asRecord(payloadRecord?.response);
+  const requestRecord = asRecord(payloadRecord?.request);
+  const bodyRecord = asRecord(responseRecord?.body);
+  const userMessageRecord = asRecord(bodyRecord?.userMessage);
+  const assistantMessageRecord = asRecord(bodyRecord?.assistantMessage);
+
+  const explicitMessage =
+    readNonEmptyString(bodyRecord?.message) ??
+    readNonEmptyString(userMessageRecord?.content) ??
+    readNonEmptyString(assistantMessageRecord?.content) ??
+    readNonEmptyString(requestRecord?.content);
+
+  return explicitMessage ?? t("runtime.conversations.timelineDefaultSummary");
 }
 
 function createDefaultMemoryFormState(): MemoryFormState {
@@ -470,11 +541,16 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
   const [activeTab, setActiveTab] = useState<RuntimeTabId>("conversations");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [threadMessages, setThreadMessages] = useState<ConversationMessage[]>([]);
+  const [conversationViewMode, setConversationViewMode] = useState<ConversationViewMode>("compact");
+  const [conversationTimelineEvents, setConversationTimelineEvents] = useState<
+    RuntimeTimelineEvent[]
+  >([]);
   const [composerDraftByConversation, setComposerDraftByConversation] = useState<
     Record<string, string>
   >({});
   const [isConversationsLoading, setIsConversationsLoading] = useState(false);
   const [isThreadLoading, setIsThreadLoading] = useState(false);
+  const [isTimelineLoading, setIsTimelineLoading] = useState(false);
   const [isCreatingConversation, setIsCreatingConversation] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [conversationError, setConversationError] = useState<string | null>(null);
@@ -685,6 +761,44 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
     }
   }, [agentId, conversationId, t, token]);
 
+  const loadConversationTimeline = useCallback(async () => {
+    if (!token || !conversationId) {
+      setConversationTimelineEvents([]);
+      return;
+    }
+
+    setIsTimelineLoading(true);
+    setConversationError(null);
+    try {
+      const response = await fetch(
+        `/api/conversations/${encodeURIComponent(conversationId)}/timeline?limit=120`,
+        {
+          headers: {
+            authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(t("runtime.conversations.timelineLoadFailed"));
+      }
+
+      const body = (await response.json()) as { items?: RuntimeTimelineEvent[] };
+      const allItems = Array.isArray(body.items) ? body.items : [];
+      const timelineItems = allItems.sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt)
+      );
+      setConversationTimelineEvents(timelineItems);
+    } catch (error) {
+      setConversationTimelineEvents([]);
+      setConversationError(
+        error instanceof Error ? error.message : t("runtime.conversations.timelineLoadFailed")
+      );
+    } finally {
+      setIsTimelineLoading(false);
+    }
+  }, [conversationId, t, token]);
+
   const applyScheduleToForm = useCallback((schedule: ScheduleSummary) => {
     setScheduleForm({
       name: schedule.label,
@@ -877,6 +991,14 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
   useEffect(() => {
     void loadConversationThread();
   }, [loadConversationThread]);
+
+  useEffect(() => {
+    if (activeTab !== "conversations" || conversationViewMode !== "detailed") {
+      return;
+    }
+
+    void loadConversationTimeline();
+  }, [activeTab, conversationViewMode, loadConversationTimeline]);
 
   useEffect(() => {
     if (activeTab === "schedules") {
@@ -1489,6 +1611,40 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                     data-testid="conversation-thread"
                     className="flex min-h-[28rem] flex-col rounded-xl border border-slate-200 bg-white"
                   >
+                    {conversationId ? (
+                      <div className="border-b border-slate-200 px-4 py-3">
+                        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                          <button
+                            type="button"
+                            data-testid="conversation-view-compact-button"
+                            onClick={() => {
+                              setConversationViewMode("compact");
+                            }}
+                            className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                              conversationViewMode === "compact"
+                                ? "bg-white text-slate-800 shadow-sm"
+                                : "text-slate-600 hover:text-slate-800"
+                            }`}
+                          >
+                            {t("runtime.conversations.view.compact")}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="conversation-view-detailed-button"
+                            onClick={() => {
+                              setConversationViewMode("detailed");
+                            }}
+                            className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                              conversationViewMode === "detailed"
+                                ? "bg-white text-slate-800 shadow-sm"
+                                : "text-slate-600 hover:text-slate-800"
+                            }`}
+                          >
+                            {t("runtime.conversations.view.detailed")}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex-1 space-y-2 overflow-y-auto p-4">
                       {isThreadLoading ? (
                         <p className="text-xs text-slate-500">
@@ -1508,9 +1664,37 @@ export function AgentRuntimeShell({ agentId, conversationId }: AgentRuntimeShell
                           </p>
                         </div>
                       ) : null}
-                      {threadMessages.length === 0 &&
-                      conversationId &&
-                      activeConversation?.status !== "archived" ? (
+                      {conversationViewMode === "detailed" && conversationId ? (
+                        isTimelineLoading ? (
+                          <p className="text-xs text-slate-500">
+                            {t("runtime.conversations.timelineLoading")}
+                          </p>
+                        ) : conversationTimelineEvents.length === 0 ? (
+                          <p className="text-xs text-slate-500">
+                            {t("runtime.conversations.timelineEmpty")}
+                          </p>
+                        ) : (
+                          conversationTimelineEvents.map((event) => (
+                            <article
+                              key={event.id}
+                              data-testid={`conversation-timeline-row-${event.id}`}
+                              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-600">
+                                  {event.kind}
+                                </p>
+                                <p className="text-[10px] text-slate-500">{event.createdAt}</p>
+                              </div>
+                              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                {summarizeTimelineEvent(event, t)}
+                              </p>
+                            </article>
+                          ))
+                        )
+                      ) : threadMessages.length === 0 &&
+                        conversationId &&
+                        activeConversation?.status !== "archived" ? (
                         <p className="text-xs text-slate-500">
                           {t("runtime.conversations.emptyThread")}
                         </p>

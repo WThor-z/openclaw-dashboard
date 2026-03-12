@@ -145,6 +145,7 @@ Runtime API endpoints:
 - `GET /api/agents/:agentId/conversations` - list agent conversations
 - `GET /api/conversations/:conversationId` - conversation detail
 - `GET /api/conversations/:conversationId/messages` - conversation messages
+- `GET /api/conversations/:conversationId/timeline` - conversation timeline events (detailed view)
 - `POST /api/control/agents/:agentId/conversations/create` - create conversation
 - `POST /api/control/conversations/:conversationId/messages/send` - send message
 - `POST /api/control/conversations/:conversationId/archive` - archive conversation

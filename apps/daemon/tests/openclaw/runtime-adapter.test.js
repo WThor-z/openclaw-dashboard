@@ -604,6 +604,45 @@ describe("openclaw runtime adapter", () => {
     expect(runCommand.mock.calls[5][0]).toContain("runs");
   });
 
+  it("lists sessions through OpenClaw CLI JSON output", async () => {
+    const runCommand = vi.fn(async () =>
+      createRunnerResult(
+        JSON.stringify({
+          path: "/tmp/.openclaw/sessions.json",
+          sessions: [{ key: "main", transcriptPath: "/tmp/.openclaw/main.jsonl" }]
+        })
+      )
+    );
+    const adapter = createOpenclawRuntimeAdapter({
+      fetchImpl: vi.fn(),
+      runCommand
+    });
+
+    const payload = await adapter.sessions.list({
+      agentId: "agent-main",
+      activeMinutes: 120,
+      limit: 30
+    });
+
+    expect(payload.sessions).toHaveLength(1);
+    expect(payload.sessions[0]).toMatchObject({ key: "main" });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(runCommand.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        "openclaw",
+        "sessions",
+        "--agent",
+        "agent-main",
+        "--active",
+        "120",
+        "--limit",
+        "30",
+        "--json",
+        "--non-interactive"
+      ])
+    );
+  });
+
   it("validates config before applying heartbeat updates", async () => {
     const runCommand = vi
       .fn()

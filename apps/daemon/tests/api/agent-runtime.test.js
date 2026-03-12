@@ -1,4 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +11,7 @@ import { createStorageRepositories } from "../../src/platform/storage/repositori
 
 const activeServers = [];
 const openDatabases = [];
+const tempDirectories = [];
 const ADMIN_TOKEN = "dev-token";
 
 afterEach(async () => {
@@ -19,6 +23,11 @@ afterEach(async () => {
   while (openDatabases.length > 0) {
     const db = openDatabases.pop();
     db.close();
+  }
+
+  while (tempDirectories.length > 0) {
+    const directory = tempDirectories.pop();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -260,6 +269,20 @@ describe("agent runtime APIs", () => {
     expect(assistantMessage.content).toBe("assistant:Summarize the latest changes.");
     expect(assistantMessage.state).toBe("completed");
 
+    const timelineResponse = await fetch(
+      `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}/timeline?limit=20`,
+      {
+        headers: authorizedHeaders()
+      }
+    );
+    const timelineBody = await timelineResponse.json();
+    expect(timelineResponse.status).toBe(200);
+    expect(Array.isArray(timelineBody.items)).toBe(true);
+    expect(timelineBody.items.map((item) => item.kind)).toEqual(
+      expect.arrayContaining(["control.agent-runtime.messages.send"])
+    );
+    expect(timelineBody.items[0].payload.response.body.conversationId).toBe(conversationId);
+
     const archiveResponse = await fetch(
       `${baseUrl}/api/control/conversations/${encodeURIComponent(conversationId)}/archive`,
       {
@@ -465,6 +488,58 @@ describe("agent runtime APIs", () => {
 
     expect(sendResponse.status).toBe(404);
     expect(sendBody.code).toBe("CONVERSATION_NOT_FOUND");
+  });
+
+  it("reads native OpenClaw transcript timeline when session metadata is available", async () => {
+    const repositories = createFixtureRepositories();
+    const conversationId = "conversation-native-timeline";
+    const sessionKey = `dashboard:agent-1:${conversationId}`;
+    repositories.conversations.insert({
+      id: conversationId,
+      agentId: "agent-1",
+      workspaceId: "ws-1",
+      sessionKey,
+      title: "Native timeline",
+      status: "active",
+      model: null,
+      createdAt: "2026-03-10T10:00:00.000Z",
+      updatedAt: "2026-03-10T10:00:00.000Z",
+      archivedAt: null
+    });
+
+    const tempDirectory = await mkdtemp(join(tmpdir(), "openclaw-daemon-test-"));
+    tempDirectories.push(tempDirectory);
+    const transcriptPath = join(tempDirectory, "transcript.jsonl");
+    await writeFile(
+      transcriptPath,
+      `${JSON.stringify({ type: "user", timestamp: "2026-03-10T10:00:01.000Z", text: "hello" })}\n${JSON.stringify({ type: "assistant", timestamp: "2026-03-10T10:00:02.000Z", text: "world" })}\n`,
+      "utf8"
+    );
+
+    const runtimeAdapter = createRuntimeAdapter({
+      sessions: {
+        list: vi.fn(async () => ({
+          path: join(tempDirectory, "sessions.json"),
+          sessions: [{ key: sessionKey, transcriptPath }]
+        }))
+      }
+    });
+    const server = await startServer({ repositories, openclawRuntimeAdapter: runtimeAdapter });
+    const baseUrl = endpointFrom(server.address());
+
+    const response = await fetch(
+      `${baseUrl}/api/conversations/${encodeURIComponent(conversationId)}/timeline?limit=20`,
+      {
+        headers: authorizedHeaders()
+      }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.source).toBe("openclaw-native-transcript");
+    expect(body.items).toHaveLength(2);
+    expect(body.items[0]).toMatchObject({ kind: "assistant" });
+    expect(body.items[1]).toMatchObject({ kind: "user" });
   });
 
   it("replays duplicate message sends without duplicating messages or audit events", async () => {

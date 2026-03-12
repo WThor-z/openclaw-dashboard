@@ -657,6 +657,28 @@ export function createOpenclawRuntimeAdapter(options = {}) {
     memory: {
       read: ({ agentId }) => runCli(["memory", "get", "--agent", agentId, "--json"]),
       configure: configureMemory
+    },
+    sessions: {
+      list: ({
+        agentId = undefined,
+        allAgents = false,
+        activeMinutes = undefined,
+        limit = undefined
+      } = {}) => {
+        const command = ["sessions"];
+        maybePush(command, "--agent", agentId);
+        if (allAgents) {
+          command.push("--all-agents");
+        }
+        if (Number.isInteger(activeMinutes) && activeMinutes > 0) {
+          command.push("--active", String(activeMinutes));
+        }
+        if (Number.isInteger(limit) && limit > 0) {
+          command.push("--limit", String(limit));
+        }
+        command.push("--json");
+        return runCli(command);
+      }
     }
   };
 }

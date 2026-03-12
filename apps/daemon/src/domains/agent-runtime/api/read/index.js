@@ -1,4 +1,6 @@
 import { HttpError, sendJson } from "../../../../shared/middleware/error-handler.js";
+import { parseAndRedactJson, redactSecrets } from "../../../../shared/redaction.js";
+import { readFile } from "node:fs/promises";
 
 function decodeSegmentOrThrow(value) {
   try {
@@ -19,6 +21,172 @@ function parsePositiveInteger(value) {
   }
 
   return parsed;
+}
+
+function asRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function readNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readConversationIdFromPayload(payload) {
+  const payloadRecord = asRecord(payload);
+  if (!payloadRecord) {
+    return null;
+  }
+
+  const directConversationId = readNonEmptyString(payloadRecord.conversationId);
+  if (directConversationId) {
+    return directConversationId;
+  }
+
+  const requestRecord = asRecord(payloadRecord.request);
+  const requestConversationId = readNonEmptyString(requestRecord?.conversationId);
+  if (requestConversationId) {
+    return requestConversationId;
+  }
+
+  const responseRecord = asRecord(payloadRecord.response);
+  const bodyRecord = asRecord(responseRecord?.body);
+  const bodyConversationId = readNonEmptyString(bodyRecord?.conversationId);
+  if (bodyConversationId) {
+    return bodyConversationId;
+  }
+
+  const conversationRecord = asRecord(bodyRecord?.conversation);
+  const conversationConversationId = readNonEmptyString(conversationRecord?.id);
+  if (conversationConversationId) {
+    return conversationConversationId;
+  }
+
+  const userMessageRecord = asRecord(bodyRecord?.userMessage);
+  const userMessageConversationId = readNonEmptyString(userMessageRecord?.conversationId);
+  if (userMessageConversationId) {
+    return userMessageConversationId;
+  }
+
+  const assistantMessageRecord = asRecord(bodyRecord?.assistantMessage);
+  return readNonEmptyString(assistantMessageRecord?.conversationId);
+}
+
+function toTimelineItem(record) {
+  return {
+    id: record.id,
+    source: record.source,
+    sessionId: record.sessionId,
+    taskId: record.taskId,
+    workspaceId: record.workspaceId,
+    level: record.level,
+    kind: record.kind,
+    payload: parseAndRedactJson(record.payloadJson),
+    createdAt: record.createdAt,
+    dedupeKey: record.dedupeKey
+  };
+}
+
+function toIsoTimestamp(value, fallbackIndex) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+    return value;
+  }
+
+  return new Date(0 + fallbackIndex).toISOString();
+}
+
+function toTranscriptTimelineItem(eventValue, index, conversation) {
+  const eventRecord = asRecord(eventValue);
+  const kind =
+    readNonEmptyString(eventRecord?.kind) ??
+    readNonEmptyString(eventRecord?.type) ??
+    readNonEmptyString(eventRecord?.event) ??
+    "openclaw.transcript.event";
+  const id =
+    readNonEmptyString(eventRecord?.id) ??
+    readNonEmptyString(eventRecord?.eventId) ??
+    `transcript-${conversation.id}-${index}`;
+  const createdAt = toIsoTimestamp(
+    eventRecord?.timestamp ?? eventRecord?.createdAt ?? eventRecord?.ts,
+    index
+  );
+
+  return {
+    id,
+    source: "openclaw-transcript",
+    sessionId: null,
+    taskId: null,
+    workspaceId: conversation.workspaceId,
+    level: "info",
+    kind,
+    payload: redactSecrets(eventRecord ?? eventValue),
+    createdAt,
+    dedupeKey: null
+  };
+}
+
+async function readTranscriptTimelineItems(transcriptPath, conversation, limit) {
+  const content = await readFile(transcriptPath, "utf8");
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const parsedEvents = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    try {
+      parsedEvents.push(JSON.parse(lines[index]));
+    } catch {
+      continue;
+    }
+  }
+
+  const selected = parsedEvents
+    .slice(-limit)
+    .map((eventValue, index) => toTranscriptTimelineItem(eventValue, index, conversation));
+
+  return selected.reverse();
+}
+
+function resolveSessionRowByConversation({ sessionsPayload, conversation }) {
+  const rows = Array.isArray(sessionsPayload?.sessions) ? sessionsPayload.sessions : [];
+  return (
+    rows.find((row) => readNonEmptyString(row?.key) === conversation.sessionKey) ??
+    rows.find((row) => readNonEmptyString(row?.sessionId) === conversation.id) ??
+    null
+  );
+}
+
+async function readNativeConversationTimeline(openclawRuntimeAdapter, conversation, limit) {
+  if (typeof openclawRuntimeAdapter?.sessions?.list !== "function") {
+    return null;
+  }
+
+  const sessionsPayload = await openclawRuntimeAdapter.sessions.list({
+    agentId: conversation.agentId,
+    limit: 200,
+    allAgents: false
+  });
+  const sessionRow = resolveSessionRowByConversation({ sessionsPayload, conversation });
+  const transcriptPath = readNonEmptyString(sessionRow?.transcriptPath);
+  if (!transcriptPath) {
+    return null;
+  }
+
+  const items = await readTranscriptTimelineItems(transcriptPath, conversation, limit);
+  return {
+    items,
+    limit,
+    conversationId: conversation.id,
+    source: "openclaw-native-transcript"
+  };
 }
 
 function mapAdapterErrorToHttpError(error) {
@@ -104,6 +272,10 @@ function resolveAgentRuntimeRoute(pathname) {
     if (segments.length === 4 && segments[3] === "messages") {
       return { kind: "conversation.messages", conversationId };
     }
+
+    if (segments.length === 4 && segments[3] === "timeline") {
+      return { kind: "conversation.timeline", conversationId };
+    }
   }
 
   return null;
@@ -188,6 +360,51 @@ async function readMemory(openclawRuntimeAdapter, agentId) {
   }
 }
 
+async function readConversationTimeline(
+  repositories,
+  openclawRuntimeAdapter,
+  conversationId,
+  limit
+) {
+  const conversation = getConversationOrThrow(repositories, conversationId);
+  const maxItems = Number.isInteger(limit) && limit > 0 ? limit : 50;
+
+  try {
+    const nativeTimeline = await readNativeConversationTimeline(
+      openclawRuntimeAdapter,
+      conversation,
+      maxItems
+    );
+    if (nativeTimeline !== null) {
+      return nativeTimeline;
+    }
+  } catch {
+    // Fallback to daemon event timeline below when native session metadata or transcript is unavailable.
+  }
+
+  const rows = repositories?.events?.listTimelineByWorkspace
+    ? repositories.events.listTimelineByWorkspace(conversation.workspaceId)
+    : [];
+  const timelineItems = [];
+  for (const row of rows) {
+    const timelineItem = toTimelineItem(row);
+    if (readConversationIdFromPayload(timelineItem.payload) !== conversationId) {
+      continue;
+    }
+
+    timelineItems.push(timelineItem);
+    if (timelineItems.length >= maxItems) {
+      break;
+    }
+  }
+
+  return {
+    items: timelineItems,
+    limit: maxItems,
+    conversationId
+  };
+}
+
 export function createAgentRuntimeReadApiRouter({ repositories, openclawRuntimeAdapter }) {
   return {
     async handle(req, res, requestUrl) {
@@ -220,6 +437,18 @@ export function createAgentRuntimeReadApiRouter({ repositories, openclawRuntimeA
           ? repositories.conversationMessages.listByConversation(route.conversationId)
           : [];
         sendJson(res, 200, { items });
+        return true;
+      }
+
+      if (route.kind === "conversation.timeline") {
+        const limit = parsePositiveInteger(requestUrl.searchParams.get("limit"));
+        const payload = await readConversationTimeline(
+          repositories,
+          openclawRuntimeAdapter,
+          route.conversationId,
+          limit
+        );
+        sendJson(res, 200, payload);
         return true;
       }
 

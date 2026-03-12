@@ -277,6 +277,71 @@ function installRuntimeFetchMock(options?: {
         });
       }
 
+      if (requestUrl.startsWith("/api/events")) {
+        return createJsonResponse(200, {
+          items: [
+            {
+              id: "event-conversation-1-send",
+              source: "daemon",
+              sessionId: null,
+              taskId: null,
+              workspaceId: "ws-1",
+              level: "info",
+              kind: "control.agent-runtime.messages.send",
+              payload: {
+                request: {
+                  content: "Hello runtime"
+                },
+                response: {
+                  status: 200,
+                  body: {
+                    conversationId: "conversation-1"
+                  }
+                }
+              },
+              createdAt: "2026-03-10T00:00:02.000Z",
+              dedupeKey: "control.agent-runtime.messages.send:sample"
+            }
+          ],
+          nextCursor: null,
+          limit: 120
+        });
+      }
+
+      if (requestUrl.startsWith("/api/conversations/") && requestUrl.includes("/timeline")) {
+        const conversationId = requestUrl
+          .replace("/api/conversations/", "")
+          .replace(/\/timeline(?:\?.*)?$/, "");
+        return createJsonResponse(200, {
+          items: [
+            {
+              id: `event-${conversationId}-send`,
+              source: "daemon",
+              sessionId: null,
+              taskId: null,
+              workspaceId: "ws-1",
+              level: "info",
+              kind: "control.agent-runtime.messages.send",
+              payload: {
+                request: {
+                  content: "Hello runtime"
+                },
+                response: {
+                  status: 200,
+                  body: {
+                    conversationId
+                  }
+                }
+              },
+              createdAt: "2026-03-10T00:00:02.000Z",
+              dedupeKey: `control.agent-runtime.messages.send:${conversationId}`
+            }
+          ],
+          limit: 120,
+          conversationId
+        });
+      }
+
       if (requestUrl === "/api/control/arm" && init?.method === "POST") {
         return createJsonResponse(200, { ok: true });
       }
@@ -738,6 +803,32 @@ describe("agent runtime routes", () => {
       "Please fail"
     );
     expect(await screen.findByText("failed")).toBeTruthy();
+  });
+
+  it("switches to detailed view and shows conversation timeline rows", async () => {
+    installRuntimeFetchMock({});
+
+    render(<App />);
+
+    fireEvent.change(screen.getByTestId("daemon-token-input"), {
+      target: { value: "dev-token" }
+    });
+    fireEvent.click(screen.getByTestId("connect-button"));
+
+    expect(await screen.findByTestId("agent-workspace-title")).toBeTruthy();
+    fireEvent.click(await screen.findByTestId("agent-runtime-link-agent-1"));
+
+    expect(await screen.findByTestId("conversation-list")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("conversation-row-conversation-1"));
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/agents/agent-1/runtime/conversations/conversation-1");
+    });
+
+    fireEvent.click(screen.getByTestId("conversation-view-detailed-button"));
+
+    expect(await screen.findByText("control.agent-runtime.messages.send")).toBeTruthy();
+    expect(screen.getByText("Hello runtime")).toBeTruthy();
   });
 
   it("does not leak unsent draft text when switching to an archived conversation", async () => {

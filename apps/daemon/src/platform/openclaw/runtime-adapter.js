@@ -273,6 +273,20 @@ function parseJsonOutput(output, fallbackCode, command) {
   }
 }
 
+function resolveCliFallbackSessionId(sessionKey) {
+  const normalized = asNonEmptyString(sessionKey);
+  if (!normalized) {
+    return null;
+  }
+
+  const match = /^(?:agent:[^:]+:dashboard:|dashboard:[^:]+:)(.+)$/.exec(normalized);
+  return match && typeof match[1] === "string" && match[1].trim().length > 0 ? match[1] : null;
+}
+
+function shouldUseCliForDashboardSession(sessionKey) {
+  return resolveCliFallbackSessionId(sessionKey) !== null;
+}
+
 async function resolveCommandContext({
   env,
   resolvePreferredStateDirImpl,
@@ -378,9 +392,9 @@ export function createOpenclawRuntimeAdapter(options = {}) {
     return asNonEmptyString(model) ?? openclawModel;
   }
 
-  async function sendMessageViaCliFallback({ agentId, content }) {
+  async function sendMessageViaCliFallback({ sessionId, content }) {
     const payload = await runCli(
-      ["agent", "--agent", agentId, "--message", content, "--json"],
+      ["agent", "--session-id", sessionId, "--message", content, "--json"],
       true,
       { nonInteractive: false }
     );
@@ -422,6 +436,14 @@ export function createOpenclawRuntimeAdapter(options = {}) {
         { code: "OPENCLAW_MODEL_REQUIRED", message: "model is required" },
         "OPENCLAW_MODEL_REQUIRED"
       );
+    }
+
+    if (shouldUseCliForDashboardSession(finalSessionKey)) {
+      const fallbackSessionId = resolveCliFallbackSessionId(finalSessionKey);
+      return sendMessageViaCliFallback({
+        sessionId: fallbackSessionId,
+        content: finalContent
+      });
     }
 
     const url = `${openclawApiBaseUrl}/v1/responses`;
@@ -492,8 +514,12 @@ export function createOpenclawRuntimeAdapter(options = {}) {
       );
 
       if (normalizedError.code === "OPENCLAW_UPSTREAM_DEACTIVATED_WORKSPACE") {
+        const fallbackSessionId = resolveCliFallbackSessionId(finalSessionKey);
+        if (!fallbackSessionId) {
+          throw normalizedError;
+        }
         return sendMessageViaCliFallback({
-          agentId: finalAgentId,
+          sessionId: fallbackSessionId,
           content: finalContent
         });
       }

@@ -427,62 +427,6 @@ describe("openclaw runtime adapter", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("uses the OpenClaw agent CLI for dashboard-scoped session keys so tool execution can continue", async () => {
-    const fetchImpl = vi.fn(async () => {
-      return new Response(
-        JSON.stringify({
-          id: "resp-read-only",
-          output_text:
-            'read({"file_path":"~/.npm-global/lib/node_modules/openclaw/skills/weather/SKILL.md"})'
-        }),
-        {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        }
-      );
-    });
-    const runCommand = vi.fn(async () =>
-      createRunnerResult(
-        JSON.stringify({
-          id: "cli-msg-2",
-          result: {
-            payloads: [{ text: 'exec1 {"command":"curl -s wttr.in/Shanghai?format=3"}' }]
-          }
-        })
-      )
-    );
-    const adapter = createOpenclawRuntimeAdapter({
-      fetchImpl,
-      runCommand,
-      openclawModel: DEFAULT_MODEL,
-      env: { OPENCLAW_MODEL: DEFAULT_MODEL },
-      resolvePreferredStateDir: async () => "/tmp/.openclaw",
-      resolveConfigCandidates: () => ["/tmp/.openclaw/openclaw.json"]
-    });
-
-    const response = await adapter.messaging.send({
-      agentId: "agent-main",
-      sessionKey: "agent:agent-main:dashboard:conv-1",
-      content: "weather in shanghai"
-    });
-
-    expect(response).toMatchObject({
-      id: "cli-msg-2",
-      outputText: 'exec1 {"command":"curl -s wttr.in/Shanghai?format=3"}'
-    });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(runCommand).toHaveBeenCalledTimes(1);
-    expect(runCommand.mock.calls[0][0]).toEqual([
-      "openclaw",
-      "agent",
-      "--session-id",
-      "conv-1",
-      "--message",
-      "weather in shanghai",
-      "--json"
-    ]);
-  });
-
   it("keeps non-deactivated upstream business errors on the gateway path", async () => {
     const fetchImpl = vi.fn(async () => {
       return new Response(
@@ -516,7 +460,7 @@ describe("openclaw runtime adapter", () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it("surfaces deactivated-workspace errors when no dashboard conversation session id can be derived", async () => {
+  it("falls back to the OpenClaw agent CLI when gateway messaging reports deactivated workspace", async () => {
     const fetchImpl = vi.fn(async () => {
       return new Response(
         JSON.stringify({
@@ -548,23 +492,50 @@ describe("openclaw runtime adapter", () => {
       resolveConfigCandidates: () => ["/tmp/.openclaw/openclaw.json"]
     });
 
-    const response = await adapter.messaging
-      .send({
-        agentId: "agent-main",
-        sessionKey: "session-001",
-        content: "hello"
-      })
-      .catch((error) => error);
+    const response = await adapter.messaging.send({
+      agentId: "agent-main",
+      sessionKey: "dashboard:agent-main:conv-1",
+      content: "hello"
+    });
 
     expect(response).toMatchObject({
-      code: "OPENCLAW_UPSTREAM_DEACTIVATED_WORKSPACE"
+      id: "cli-msg-1",
+      outputText: "hello from cli"
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(runCommand.mock.calls[0][0]).toEqual([
+      "openclaw",
+      "agent",
+      "--agent",
+      "agent-main",
+      "--message",
+      "hello",
+      "--json"
+    ]);
+    expect(runCommand.mock.calls[0][0]).not.toContain("--non-interactive");
+    expect(runCommand.mock.calls[0][1]).toMatchObject({
+      cwd: "/tmp/.openclaw",
+      env: expect.objectContaining({
+        OPENCLAW_STATE_DIR: "/tmp/.openclaw",
+        OPENCLAW_CONFIG_PATH: "/tmp/.openclaw/openclaw.json"
+      })
+    });
   });
 
-  it("surfaces normalized CLI errors for dashboard-scoped sessions when direct CLI execution fails", async () => {
-    const fetchImpl = vi.fn();
+  it("surfaces normalized CLI errors when deactivated-workspace fallback also fails", async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          id: "resp-business-error",
+          output_text: '{"detail":{"code":"deactivated_workspace"}}'
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    });
     const runCommand = vi.fn(async () => {
       return createRunnerResult("", 2, "cli agent failed");
     });
@@ -579,14 +550,14 @@ describe("openclaw runtime adapter", () => {
     await expect(
       adapter.messaging.send({
         agentId: "agent-main",
-        sessionKey: "agent:agent-main:dashboard:conv-1",
+        sessionKey: "dashboard:agent-main:conv-1",
         content: "hello"
       })
     ).rejects.toMatchObject({
       code: "OPENCLAW_CLI_EXIT_2",
       message: "cli agent failed"
     });
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(runCommand).toHaveBeenCalledTimes(1);
   });
 
